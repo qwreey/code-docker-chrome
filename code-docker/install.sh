@@ -16,7 +16,6 @@ UNIT_DIR="/code/.local/share/code-docker/supervisord"
 BIN_DIR="/code/.local/bin"
 BIN="${BIN_DIR}/cdp-bridge"
 MISE="${HOME}/.local/bin/mise"
-MODULE="github.com/qwreey/code-docker-chrome/cdp-bridge"
 SRC_DIR="$(cd "$(dirname "$0")/../cdp-bridge" && pwd)"
 
 if [[ ! -d "${UNIT_DIR}" ]]; then
@@ -34,29 +33,27 @@ fi
 
 mkdir -p "${BIN_DIR}"
 
-# cdp-unwrap.conf hardcodes ${BIN} rather than resolving whatever mise happens to do,
-# because mise's go backend puts its shim under its own share directory - a path that
-# depends on mise's layout and on the tool still being installed. A supervisord unit
-# that outlives a `mise prune` is worth the one extra indirection, so whichever branch
-# below runs, it lands the binary at exactly ${BIN}.
+# Built from the source the overlay mounts, not fetched. mise is here for the Go
+# toolchain only, so the agent container needs nothing preinstalled, but the module
+# itself deliberately does not come over the network:
+#
+#   - it would be a different build than the one running. `@latest` resolves against
+#     this repo's default branch, while the wrap half is baked into the chrome image
+#     from whatever checkout built it. The source under ${SRC_DIR} is that checkout,
+#     so building it is the only way the two halves are guaranteed to match.
+#   - mise's go backend resolves versions from tags and this repo has none, so
+#     `mise use -g go:<this module>@latest` fails outright with "no versions found ...
+#     matching date filter" (measured). Tagging releases would fix that, but a compose
+#     provider is not a library and does not want a release cadence.
+#   - and it works with no egress at all, which matters in a container whose whole
+#     network policy is "the border is router's alone".
+#
+# ${BIN} is a fixed path on the volume because cdp-unwrap.conf names it literally -
+# a supervisord unit should not depend on where a package manager put a shim today.
 echo "==> installing cdp-bridge"
-if "${MISE}" use -g "go:${MODULE}@latest" 2>/dev/null; then
-  SHIM="$("${MISE}" which cdp-bridge 2>/dev/null || true)"
-  if [[ -z "${SHIM}" ]]; then
-    echo >&2 "install.sh: mise installed go:${MODULE} but 'mise which cdp-bridge' found nothing."
-    exit 1
-  fi
-  ln -sf "${SHIM}" "${BIN}"
-  echo "    via mise -> ${SHIM}"
-else
-  # Expected until this repo is published somewhere `go install` can reach. The source
-  # is sitting right next to this script either way, so build it - mise supplies the Go
-  # toolchain so the agent container needs nothing preinstalled.
-  echo "    go:${MODULE} not fetchable - building from ${SRC_DIR}"
-  "${MISE}" ls --installed 2>/dev/null | grep -q '^go\b' || "${MISE}" use -g go@latest
-  ( cd "${SRC_DIR}" && "${MISE}" exec -- env CGO_ENABLED=0 go build -ldflags="-s -w" -o "${BIN}" . )
-  echo "    built -> ${BIN}"
-fi
+"${MISE}" ls --installed 2>/dev/null | grep -q '^go\b' || "${MISE}" use -g go@latest
+( cd "${SRC_DIR}" && "${MISE}" exec -- env CGO_ENABLED=0 go build -ldflags="-s -w" -o "${BIN}" . )
+echo "    built ${SRC_DIR} -> ${BIN}"
 "${BIN}" 2>&1 | head -1 || true
 
 echo "==> ensuring node is available for chrome-devtools-mcp"
