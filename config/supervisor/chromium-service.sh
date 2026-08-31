@@ -8,6 +8,27 @@ CHROME_PROFILE_DIR="${CHROME_PROFILE_DIR:-/data/profile}"
 CDP_PORT="${CDP_PORT:-9222}"
 mkdir -p "${CHROME_PROFILE_DIR}"
 
+# Clear the profile lock left by a Chrome that did not shut down cleanly. This is not
+# housekeeping - without it a container recreate permanently bricks the browser.
+#
+# SingletonLock is a symlink named <hostname>-<pid>. The profile lives on a volume that
+# outlives the container while the hostname is the container id, so after
+# `docker compose up -d` (any config change recreates) Chrome finds a lock naming a host
+# that is not this one, decides another machine is using the profile, and refuses to
+# start - forever, since autorestart just replays the same refusal until supervisord
+# gives up FATAL. Measured: `The profile appears to be in use by another Chromium
+# process (28) on another computer (2fede9f1f322)`.
+#
+# `pgrep -x`, not `pgrep`: this script's own comm is truncated to `chromium-servic`,
+# which `pgrep chromium` matches as a substring - the guard would always see "chromium
+# is running", skip the cleanup, and silently do nothing. Verified in-container.
+# (linuxserver/docker-chromium does the same cleanup with a bare `pgrep chromium`; its
+# wrapper is named `wrapped-chromium`, whose comm truncates to `wrapped-chromiu` and
+# happens not to match.)
+if ! pgrep -x chromium >/dev/null 2>&1; then
+  rm -f "${CHROME_PROFILE_DIR}"/Singleton*
+fi
+
 # --no-sandbox, deliberately. Two independent reasons, both verified rather than assumed
 # (see the research writeup this repo was built from):
 #
