@@ -71,6 +71,27 @@ CDP용 전용 망을 만들지 않은 것은 의도적입니다 — 그러려면
 하고, 프로바이더가 메인의 토폴로지를 고치는 셈이 됩니다. 토큰이 같은 결과를 냅니다.
 반대로 VNC망은 **빼기**라서(code-docker를 제외하는 것) 그 문제가 없습니다.
 
+## cdp-bridge를 고쳤다면
+
+같은 `cdp-bridge/main.go`가 **두 번, 서로 다른 곳에서** 빌드됩니다.
+
+| 어느 쪽 | 언제 | 어디서 | 결과물 |
+|---|---|---|---|
+| `wrap` | `docker compose build code-docker-chrome` | Dockerfile 1단계, `golang:1.27-alpine` | 이미지 안 `/usr/local/bin/cdp-bridge` |
+| `unwrap` | `install.sh` 실행 | 돌아가는 code-docker 안, mise의 go 1.27 | `/code/.local/bin/cdp-bridge` |
+
+`unwrap` 쪽이 읽는 소스는 오버레이가 마운트한 **작업 트리 실시간**이고, `wrap` 쪽은
+**이미지 빌드 당시의 스냅샷**입니다. 그래서 소스를 고치면 둘 다 해줘야 합니다:
+
+```sh
+docker compose build code-docker-chrome && docker compose up -d code-docker-chrome
+docker exec -it code-docker /run/code-docker-chrome/code-docker/install.sh
+```
+
+한쪽만 하면 두 절반의 버전이 갈립니다. 실질적으로는 거의 문제가 안 됩니다 — 둘이
+주고받는 건 진화하는 와이어 프로토콜이 아니라 HTTP 리버스 프록시 + Bearer 헤더
+하나뿐이라 깨질 지점이 없습니다. 그래도 디버깅할 때 헷갈릴 수 있으니 알아두세요.
+
 ## 알아둘 것
 
 - **Chrome은 `--no-sandbox`로 돕니다.** 컨테이너가 root로 돌고, Chrome은 root에서
