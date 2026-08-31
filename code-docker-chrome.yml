@@ -15,6 +15,11 @@ services:
   code-docker-chrome:
     build:
       context: "${CHROME_BUILD_CONTEXT:-builds/code-docker-chrome}"
+    # Every other container in this stack pins its name, and this one is the one people
+    # will reach for with `docker logs` when the browser misbehaves. Nothing depends on
+    # it for addressing - the CDP and VNC paths both use network aliases, so the name is
+    # purely for humans.
+    container_name: "${PREFIX:-}code-docker-chrome"
     restart: unless-stopped
     # Chrome dies in confusing ways on Docker's default 64MB /dev/shm - every
     # chrome-in-docker image documents this.
@@ -86,12 +91,20 @@ networks:
     internal: true
     # ${PREFIX} for the same reason code-docker prefixes its own networks: two
     # code-docker instances that both attach this provider must not silently share one
-    # network.
-    name: "${PREFIX:-}chrome-vnc"
+    # network, mixing one deployment's router with the other's browser. Named for the
+    # project rather than the alias (chrome-vnc, above) so it reads unambiguously in
+    # `docker network ls` next to code-docker's own.
+    name: "${PREFIX:-}code-docker-chrome-vnc"
     labels:
-      # Tells netinit-docker this network is not an egress path and needs no DOCKER-USER
-      # forward exception - the label-based replacement for the deprecated
-      # OOTB_EXTRA_INTERNAL_NETWORKS manifest field.
+      # netinit.provider is what opts this network in to the agent at all - matching is
+      # fail-closed, so without it netinit-docker never looks at this network and the
+      # exemption below would silently never be applied. netinit.gateway is
+      # deliberately absent: this is a relay path to a person, not an egress path, and a
+      # network that declares no gateway never becomes one.
+      netinit.provider: "${PREFIX:-}code-docker-netinit-docker"
+      # Replaces the deprecated NETFILTER_FIX_EXTRA_INTERNAL_NETWORKS entry the user
+      # used to have to add to code-docker's own .env - the coupling EXTRA_INCLUDE
+      # exists to avoid. The project that needs it declares it.
       netinit.exempt-forward: "true"
 
 volumes:
