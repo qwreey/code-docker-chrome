@@ -81,6 +81,11 @@ install -m 644 "$(dirname "$0")/cdp-unwrap.conf" "${UNIT_DIR}/cdp-unwrap.conf"
 
 echo "==> reloading supervisord"
 reload-services
+# `reload-services` is reread+update, which only acts on units whose *config* changed.
+# On a re-run the unit is byte-identical and the rebuilt binary lands at the same path,
+# so update does nothing and the old process keeps serving the old code. Restart
+# explicitly - re-running this script is exactly how someone picks up an edit.
+supervisorctl restart cdp-unwrap
 
 cat <<'MSG'
 

@@ -14,7 +14,12 @@
 services:
   code-docker-chrome:
     build:
-      context: "${CHROME_BUILD_CONTEXT:-builds/code-docker-chrome}"
+      # `.`, not a variable. Compose resolves a relative path in an *included*
+      # fragment against that fragment's own directory, and this file always sits in
+      # the repo root - so `.` is correct wherever ootb clones the repo, and there is
+      # nothing for a deployment to configure. Measured: a marker value `./ZZZ` here
+      # resolves to <this repo>/ZZZ, not <deploy dir>/ZZZ.
+      context: .
     # Every other container in this stack pins its name, and this one is the one people
     # will reach for with `docker logs` when the browser misbehaves. Nothing depends on
     # it for addressing - the CDP and VNC paths both use network aliases, so the name is
@@ -48,6 +53,11 @@ services:
       VNC_BIND_ALIAS: chrome-vnc
       SCREEN_SIZE: "${CHROME_SCREEN_SIZE:-1920x1080}"
       CHROME_START_URL: "${CHROME_START_URL:-about:blank}"
+      # Compose forwards nothing it is not told to. Both of these are read by the
+      # service scripts and documented in .env.example, so leaving them out meant a
+      # user who set VNC_PASSWORD got an unauthenticated wayvnc with no error at all.
+      VNC_PASSWORD: "${VNC_PASSWORD:-}"
+      CHROME_EXTRA_ARGS: "${CHROME_EXTRA_ARGS:-}"
     networks:
       # Shared with code-docker (and dind, and anything else on it) - which is exactly
       # why cdp-wrap requires a bearer token instead of relying on reachability. A
@@ -86,8 +96,8 @@ services:
       #
       # Read-only, and only the two directories the installer needs: the unit file and
       # the Go source for its offline build path.
-      - "${CHROME_BUILD_CONTEXT:-builds/code-docker-chrome}/code-docker:/run/code-docker-chrome/code-docker:ro"
-      - "${CHROME_BUILD_CONTEXT:-builds/code-docker-chrome}/cdp-bridge:/run/code-docker-chrome/cdp-bridge:ro"
+      - "./code-docker:/run/code-docker-chrome/code-docker:ro"
+      - "./cdp-bridge:/run/code-docker-chrome/cdp-bridge:ro"
 
   # Field merge into a service this file does not define - include merging is by service
   # name, already validated in code-docker. router needs to be on chrome-vnc to relay

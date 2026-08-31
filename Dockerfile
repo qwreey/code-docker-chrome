@@ -61,7 +61,12 @@ COPY --from=cdp-bridge /cdp-bridge /usr/local/bin/cdp-bridge
 COPY config/supervisord.conf /etc/code-docker-chrome/supervisord.conf
 COPY config/supervisord.d/ /etc/code-docker-chrome/supervisord.d/
 COPY config/supervisor/ /etc/code-docker-chrome/
-COPY config/wm/ /etc/code-docker-chrome/wm/
+# /etc/xdg/labwc/ specifically: labwc only reads $XDG_CONFIG_HOME/labwc/,
+# $HOME/.config/labwc/ and /etc/xdg/labwc/, and labwc-service.sh execs it with no -C.
+# Copied anywhere else the file is inert - which is how the decoration-disabling rule
+# below silently did nothing. roblox-studio-docker lands its labwc config the same way.
+COPY config/wm/labwc-rc.xml /etc/xdg/labwc/rc.xml
+COPY config/wm/labwc-autostart /etc/xdg/labwc/autostart
 COPY entrypoint.sh /etc/code-docker-chrome/entrypoint.sh
 RUN chmod +x /etc/code-docker-chrome/entrypoint.sh /etc/code-docker-chrome/*-service.sh
 

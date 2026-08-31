@@ -30,7 +30,14 @@ it, and that look like oversights if you don't know why:
   such deployment here.
 - No `ports:` anywhere, so nothing to `!reset`.
 - `.env.example` documents variables read from **code-docker's** `.env`, not from a
-  compose file in this directory. There isn't one to load an env file for.
+  compose file in this directory. There isn't one to load an env file for. Anything the
+  container needs must be listed in the overlay's `environment:` — Compose forwards
+  nothing it is not told to, so a variable that is only documented is a variable that
+  silently does nothing.
+- Relative paths in the overlay resolve against **this repo's directory**, not the
+  deploy directory, because that is how Compose treats an included fragment (measured).
+  So `context: .` and `./code-docker` are correct wherever ootb clones the repo, and no
+  build-context variable is needed.
 
 ## Architecture
 
