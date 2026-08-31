@@ -1,0 +1,99 @@
+# The only compose file in this repo, on purpose.
+#
+# roblox-studio-docker keeps a standalone docker-compose.yml and layers this kind of
+# overlay on top, because Roblox Studio in a container is a thing worth having on its
+# own. Chrome in a container is not - there are several good ones already. This image
+# exists solely to attach a browser to code-docker, so there is nothing to opt out of
+# and no second compose file to keep in sync.
+#
+# It is pulled in through code-docker's extra-include.yml -> EXTRA_INCLUDE hook, which
+# `ootb.sh` writes from ootb-manifest.env. Running this file on its own is not
+# supported: code-docker-internal and code-docker-router are defined only in
+# code-docker's own docker-compose.yml.
+
+services:
+  code-docker-chrome:
+    build:
+      context: "${CHROME_BUILD_CONTEXT:-builds/code-docker-chrome}"
+    restart: unless-stopped
+    # Chrome dies in confusing ways on Docker's default 64MB /dev/shm - every
+    # chrome-in-docker image documents this.
+    shm_size: "1gb"
+    # No capabilities. Routing is planted from outside by netinit-docker, which is the
+    # whole reason that agent lives on the host side.
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Opt-in label that makes code-docker's host-side netinit-docker agent manage this
+    # container's egress. Where the gateway is comes from the *network* side
+    # (code-docker-internal's netinit.gateway label in code-docker's own compose), not
+    # from here - so a container on several networks needs nothing extra, and a network
+    # that declares no gateway (chrome-vnc below) never becomes an egress path.
+    # Matching is fail-closed: no label, no agent touches it.
+    labels:
+      netinit.provider: "${PREFIX:-}code-docker-netinit-docker"
+    environment:
+      # Shared secret for the CDP tunnel. cdp-bridge refuses to start on an empty value
+      # rather than accepting every caller (wrap) or sending a blank header that reads
+      # as an unexplained 401 (unwrap). ootb generates it - see ootb-manifest.env.
+      CHROME_CDP_TOKEN: "${CHROME_CDP_TOKEN:?CHROME_CDP_TOKEN is required - run ootb.sh/migrate.sh, or set it in code-docker's .env}"
+      # Bind each listener to exactly one network. Both resolve through getent and fail
+      # closed; see config/supervisor/resolve-bind-alias.sh.
+      CDP_BIND_ALIAS: chrome-cdp
+      VNC_BIND_ALIAS: chrome-vnc
+      SCREEN_SIZE: "${CHROME_SCREEN_SIZE:-1920x1080}"
+      CHROME_START_URL: "${CHROME_START_URL:-about:blank}"
+    networks:
+      # Shared with code-docker (and dind, and anything else on it) - which is exactly
+      # why cdp-wrap requires a bearer token instead of relying on reachability. A
+      # dedicated CDP network was considered and rejected: code-docker would have to
+      # join it, which would make this provider edit the main project's topology. The
+      # token gets the same result without that.
+      code-docker-internal:
+        aliases:
+          - chrome-cdp
+      # VNC is the opposite shape - a subtraction. Only router joins, so the agent
+      # container cannot reach the screen at all, and a person gets there through
+      # router's VNC tab. Same "the border is router's alone" rule
+      # roblox-studio-docker's VNC isolation follows.
+      chrome-vnc:
+        aliases:
+          - chrome-vnc
+    volumes:
+      # The Chrome profile - logins, cookies, extensions. Named rather than a host path
+      # because relative paths in an included file resolve against *this* file's
+      # directory, which is a footgun in a repo that is only ever included.
+      - chrome-profile:/data/profile
+
+  # Hand the token to the consumer. code-docker's own service has no idea this project
+  # exists (that is the point), so without this merge $CHROME_CDP_TOKEN is empty inside
+  # the agent container and cdp-bridge unwrap refuses to start - the same failure
+  # roblox-studio-docker's overlay merges MCP_TOKEN to avoid.
+  code-docker:
+    environment:
+      CHROME_CDP_TOKEN: "${CHROME_CDP_TOKEN:-}"
+
+  # Field merge into a service this file does not define - include merging is by service
+  # name, already validated in code-docker. router needs to be on chrome-vnc to relay
+  # VNC to a person; the actual forward/App Route entry is added at runtime from
+  # router-manager, not here.
+  code-docker-router:
+    networks:
+      - chrome-vnc
+
+networks:
+  chrome-vnc:
+    internal: true
+    # ${PREFIX} for the same reason code-docker prefixes its own networks: two
+    # code-docker instances that both attach this provider must not silently share one
+    # network.
+    name: "${PREFIX:-}chrome-vnc"
+    labels:
+      # Tells netinit-docker this network is not an egress path and needs no DOCKER-USER
+      # forward exception - the label-based replacement for the deprecated
+      # OOTB_EXTRA_INTERNAL_NETWORKS manifest field.
+      netinit.exempt-forward: "true"
+
+volumes:
+  chrome-profile:
+    name: "${PREFIX:-}code-docker-chrome-profile"

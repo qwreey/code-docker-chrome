@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!-- Minimal labwc config. There is exactly one application here and it starts
+     maximized, so this only needs to not get in the way: no decorations to waste
+     pixels over VNC, and no keybindings that could close the only window. -->
+<labwc_config>
+  <theme>
+    <cornerRadius>0</cornerRadius>
+  </theme>
+  <windowRules>
+    <windowRule identifier="*">
+      <serverDecoration>no</serverDecoration>
+    </windowRule>
+  </windowRules>
+</labwc_config>
