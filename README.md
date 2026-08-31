@@ -25,7 +25,16 @@ clone, `extra-include.yml` 작성, router 대상 allowlist 등록, `CHROME_CDP_T
 `docker compose up -d` 다음, code-docker 안에서 한 번:
 
 ```sh
-/code/builds/code-docker-chrome/code-docker/install.sh
+/run/code-docker-chrome/code-docker/install.sh
+```
+
+이 오버레이가 그 경로에 자기 `code-docker/`와 `cdp-bridge/`를 읽기 전용으로 넣어줍니다 —
+설치 스크립트는 code-docker의 mise와 `reload-services`를 써야 해서 그 컨테이너 **안에서**
+돌아야 하는데, 이 레포는 호스트의 배포 디렉터리(`builds/`)에 있고 code-docker가
+마운트하는 어떤 경로에도 들어있지 않기 때문입니다. 호스트에서 바로 돌려도 됩니다:
+
+```sh
+docker exec -it code-docker /run/code-docker-chrome/code-docker/install.sh
 ```
 
 cdp-bridge를 mise로 깔고, `cdp-unwrap` 서비스를 supervisord에 얹고, MCP 등록 명령을 안내합니다.

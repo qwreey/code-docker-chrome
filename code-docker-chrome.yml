@@ -77,6 +77,17 @@ services:
   code-docker:
     environment:
       CHROME_CDP_TOKEN: "${CHROME_CDP_TOKEN:-}"
+    volumes:
+      # code-docker/install.sh has to run *inside* that container - it uses its mise and
+      # its reload-services - but this repo is checked out on the host, outside every
+      # path code-docker mounts (builds/ lives beside docker-compose.yml in the deploy
+      # directory; /code is the HOME_VOLUME and has no builds/ in it). So the provider
+      # hands its own installer over the same way it hands over the token.
+      #
+      # Read-only, and only the two directories the installer needs: the unit file and
+      # the Go source for its offline build path.
+      - "${CHROME_BUILD_CONTEXT:-builds/code-docker-chrome}/code-docker:/run/code-docker-chrome/code-docker:ro"
+      - "${CHROME_BUILD_CONTEXT:-builds/code-docker-chrome}/cdp-bridge:/run/code-docker-chrome/cdp-bridge:ro"
 
   # Field merge into a service this file does not define - include merging is by service
   # name, already validated in code-docker. router needs to be on chrome-vnc to relay
