@@ -48,9 +48,11 @@ RUN mkdir -p /var/log/dbus /var/log/labwc /var/log/wayvnc /var/log/chromium \
 # dns-local is what gives this container working DNS while it sits on internal: true
 # networks; netshare carries the wait-until helper it uses. Both are fetched from
 # router-docker-client rather than vendored, exactly as roblox-studio-docker does -
-# neither is specific to this project.
-ADD https://github.com/qwreey/router-docker-client.git#main:dns-local /etc/code-docker-chrome/router-client/dns-local
-ADD https://github.com/qwreey/router-docker-client.git#main:netshare /etc/code-docker-chrome/router-client/netshare
+# neither is specific to this project. Pinned to that repo's release tag (see its own
+# CLAUDE.md); code-docker's dev-bump-router-client.sh moves this default.
+ARG ROUTER_CLIENT_REF=v0.1.0
+ADD https://github.com/qwreey/router-docker-client.git#${ROUTER_CLIENT_REF}:dns-local /etc/code-docker-chrome/router-client/dns-local
+ADD https://github.com/qwreey/router-docker-client.git#${ROUTER_CLIENT_REF}:netshare /etc/code-docker-chrome/router-client/netshare
 RUN chmod +x /etc/code-docker-chrome/router-client/dns-local/dns-local.sh
 
 COPY --from=cdp-bridge /cdp-bridge /usr/local/bin/cdp-bridge
