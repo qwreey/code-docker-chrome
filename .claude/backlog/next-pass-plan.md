@@ -46,9 +46,19 @@ code-docker-firecrawl을 만들며 정리한 위협 모델 (code-docker의
 - 방향: Chrome 본체는 전용망(`netinit.gateway` = router)에만 두고, `code-docker-internal`
   에는 `cdp-bridge wrap`만 붙인다(이미 bearer 토큰 게이트가 있으니 브리지 역할에 맞다).
   VNC는 지금처럼 `chrome-vnc` 격리망 + router.
-- **먼저 실측할 것:** Chromium의 Private Network Access가 공개 사이트 → 사설 IP
-  (DNS rebinding 포함) 요청을 실제로 막는지. firecrawl 작업에서 playwright로 같은
-  실측을 하기로 했으니 그 결과를 먼저 볼 것 — 막힌다면 우선순위가 내려간다.
+- **실측 결과 (2026-09-28, 이 컨테이너의 Chromium 151):** `https://example.com`
+  페이지에서 `fetch('http://<code-docker-internal IP>:port/')`(no-cors, cors 둘 다)는
+  8초 타임아웃까지 **보류**되고 서버엔 요청이 한 번도 도착하지 않았다. 같은 주소를 직접
+  내비게이션하거나 사설 origin 페이지에서 부르면 정상 도착 — 즉 Local Network Access가
+  공개→사설 요청을 **권한 프롬프트 뒤에** 붙잡는다(판정이 목적지 IP 기준이라 DNS
+  rebinding도 같은 벽에 걸림). 게다가 보류된 프롬프트가 탭에 남아 다음 내비게이션까지
+  막았다.
+  - 그래서 우선순위는 내려가지만 0은 아니다: 막는 게 "거부"가 아니라 **사람 클릭 한 번**
+    이다. VNC로 보는 사람이 "허용"을 누르거나, 에이전트가 CDP로 권한을 주면(
+    `Browser.grantPermissions`) 그 origin은 프로필에 허용으로 남는다.
+  - 참고: 그 사이 code-docker 쪽이 바뀌어 code-server/webmanager는 이제 loopback에만
+    열리고(nginx :80만 망에 노출), router 앞문도 이 망에서 닫혔다. 이 망에서 여전히
+    인증 없이 닿는 큰 것은 `dind:2375`와 code-docker nginx(:80)다.
 
 ## 4. 확장(extension) 개발 기반
 
