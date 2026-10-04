@@ -60,6 +60,38 @@ code-docker-firecrawl을 만들며 정리한 위협 모델 (code-docker의
     열리고(nginx :80만 망에 노출), router 앞문도 이 망에서 닫혔다. 이 망에서 여전히
     인증 없이 닿는 큰 것은 `dind:2375`와 code-docker nginx(:80)다.
 
+- **결정 근거 정리 (2026-10-04 조사, 권장: 착수 시 1순위로 처리)**
+  - LNA는 네트워크 경계가 아니라 사람이나 CDP가 풀 수 있는 권한 프롬프트다. 허용은
+    프로필에 남는다. 이 Chromium은 root + `--no-sandbox`라 렌더러가 뚫리면 LNA 자체를
+    건너뛴다. "닿지 않음"만이 믿을 수 있는 벽이다.
+  - 대체 수단으로 쓰면 안 되는 것: `LocalNetworkAccessAllowedForUrls` 정책,
+    `--disable-features=LocalNetworkAccessChecks`. 둘 다 권한을 **여는** 쪽이고, 플래그는
+    내부용이라 언제든 사라질 수 있다.
+    - LNA 일정: Chrome 138 플래그 미리보기, 142부터 강제, 145에서 `local-network` /
+      `loopback-network`로 나뉨, 146부터 WebRTC에도 적용.
+    - 출처: developer.chrome.com/blog/local-network-access,
+      chromestatus 5068298146414592,
+      learn.microsoft.com/ecdn/how-to/configure-local-network-access-policy
+  - 선례:
+    - Selenium Grid가 노출된 채 탈취됐다(SeleniumGreed, 3만 개 이상, wiz.io).
+    - Playwright Docker 문서는 "신뢰하지 않는 사이트 방문용 아님"이라고 쓴다.
+    - Anthropic computer-use 데모는 전용 VM과 네트워크 제한을 권한다.
+    - 격리를 기본으로 주는 이미지는 찾지 못했다(browserless/neko는 미확인).
+  - 바뀌는 구성:
+    - Chrome 본체는 전용 망에만 둔다(`netinit.gateway` = router).
+    - `cdp-bridge wrap`을 별도 컨테이너로 떼어, 그것만 전용 망과 `code-docker-internal`에
+      양다리를 걸친다.
+    - VNC는 지금처럼 둔다.
+    - compose 주석의 "전용 CDP 망 기각"은 code-docker가 새 망에 들어가야 해서였다. 이번
+      안은 브리지가 internal에 들어오는 쪽이라 그 이유와 충돌하지 않는다.
+  - **비용**: Chrome이 code-docker/dind 안의 dev 서버(`http://code-docker:3000` 등)에
+    직접 못 닿는다. router App Routes나 Dev Proxy 주소를 거쳐야 한다. 이 쓰임이 잦다면
+    dev 서버용 App Route를 쉽게 만드는 길을 같이 설계할 것.
+  - 미검증:
+    - 바꾼 뒤 chrome-vnc/router 경로가 그대로 되는지
+    - 브리지 별칭(`chrome-cdp`) 해석
+    - `Browser.grantPermissions`가 LNA 권한을 실제로 주는지
+
 ## 4. 확장(extension) 개발 기반
 
 이 레포의 존재 이유 중 하나가 **Chrome 확장을 개발할 수 있게 하는 것**인데, 그 바탕이
@@ -73,3 +105,29 @@ code-docker-firecrawl을 만들며 정리한 위협 모델 (code-docker의
 - 프로필 분리: 일상 브라우징 프로필(로그인 유지)과 확장 테스트용 깨끗한 프로필을
   나눌지.
 - 3번 망 분리와 같이 설계할 것 — 마운트 경로와 브리지 위치가 서로 얽힌다.
+
+- **결정 근거 정리 (2026-10-04 조사, 권장)**
+  - 권장안:
+    - 개발 중인 확장 폴더 **하나만** 읽기 전용으로 마운트한다(`/code` 전체는 금지). 두
+      방식 모두 브라우저 쪽 경로에서 읽으므로 어느 쪽이든 필요하다.
+    - 평소 루프는 CDP `Extensions.loadUnpacked`로 돌린다. chrome-devtools-mcp의
+      install/reload 도구도 쓸 수 있다.
+    - 안 되면 `CHROME_EXTRA_ARGS`로 `--load-extension`을 쓴다.
+    - 확장 테스트는 **깨끗한 두 번째 프로필**(별도 볼륨)에서 한다.
+  - 근거:
+    - CDP 방식은 브라우저 재시작이 필요 없어 VNC 세션이 유지되고, 에이전트가 기존 CDP
+      브리지만으로 수정-리로드-확인 루프를 닫을 수 있다.
+    - `--load-extension`은 Chrome 정식판에서는 137에 제거됐지만, Chromium과 Chrome for
+      Testing에서는 유지된다. 이 컨테이너는 Arch `chromium`이다.
+      - 출처: groups.google.com/a/chromium.org/g/chromium-extensions/c/1-g8EFx2BBY
+    - Puppeteer #14536 / PR #15059(2026-05, m149)가 `loadUnpacked`의 pipe 전용 제한을
+      풀었다. 포트(WebSocket) 연결로도 될 가능성이 높다.
+      - 출처: github.com/puppeteer/puppeteer/pull/15059, pptr.dev/guides/chrome-extensions
+    - 프로필 분리:
+      - 권한이 넓은 개발 확장이 일상 프로필의 로그인 세션을 읽을 수 있다.
+      - `loadUnpacked`한 확장은 프로필(Secure Preferences)에 남는다.
+      - Puppeteer와 Playwright도 테스트마다 새 프로필을 쓴다. 다만 일상 프로필과 나누라고
+        명시한 출처는 없어서 추론이다.
+  - **착수 전 실측 1회**: 컨테이너의 Chromium 151에서 `unwrap`을 거쳐 `Extensions.loadUnpacked`가
+    되는지 확인한다. `--enable-unsafe-extension-debugging` 유무 두 경우를 다 본다.
+  - 3번(망 분리)과는 독립적이다. 마운트는 Chrome 컨테이너에 붙으므로 망 구성과 무관하다.

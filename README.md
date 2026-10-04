@@ -1,5 +1,10 @@
 # code-docker-chrome
 
+> **⚠️ 아직 쓰지 마세요 (실험 단계, 2026-10).** 운영 환경에서 검증되지 않았고, 알려진 보안
+> 문제가 남아 있습니다. 대표적으로 임의 사이트를 여는 Chrome이 `code-docker-internal`에
+> 직접 붙어 있어, 인증 없는 `dind:2375`와 같은 네트워크에 있습니다. 정리 계획은
+> [`.claude/backlog/next-pass-plan.md`](.claude/backlog/next-pass-plan.md)에 있습니다.
+
 [code-docker](https://github.com/qwreey/code-docker)에 **Chrome을 물리기 위한 프로바이더**입니다.
 
 컨테이너 안에서 Chrome(labwc + wayvnc)을 띄우고, 두 가지 경로로 내보냅니다.
