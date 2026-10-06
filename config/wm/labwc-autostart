@@ -1,0 +1,5 @@
+#!/bin/sh
+# labwc has no panel of its own. waybar is the taskbar: the app launcher, the window list
+# (the only way back to a window minimized with Chromium's own titlebar button) and a
+# clock.
+waybar -c /etc/xdg/labwc/waybar-config.jsonc -s /etc/xdg/labwc/waybar-style.css &

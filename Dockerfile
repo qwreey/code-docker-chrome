@@ -17,6 +17,10 @@ RUN pacman -Syu --noconfirm --needed \
       labwc \
       wlr-randr \
       wayvnc \
+      waybar \
+      wofi \
+      thunar \
+      desktop-file-utils \
       dbus \
       supervisor \
       dnsmasq \
@@ -65,10 +69,58 @@ COPY config/supervisord.d/ /etc/code-docker-chrome/supervisord.d/
 COPY config/supervisor/ /etc/code-docker-chrome/
 # /etc/xdg/labwc/ specifically: labwc only reads $XDG_CONFIG_HOME/labwc/,
 # $HOME/.config/labwc/ and /etc/xdg/labwc/, and labwc-service.sh execs it with no -C.
-# Copied anywhere else the file is inert - which is how the decoration-disabling rule
-# below silently did nothing. roblox-studio-docker lands its labwc config the same way.
+# Copied anywhere else the file is inert. roblox-studio-docker lands its labwc config
+# the same way.
 COPY config/wm/labwc-rc.xml /etc/xdg/labwc/rc.xml
+COPY config/wm/labwc-menu.xml /etc/xdg/labwc/menu.xml
 COPY config/wm/labwc-autostart /etc/xdg/labwc/autostart
+COPY config/wm/waybar-config.jsonc /etc/xdg/labwc/waybar-config.jsonc
+COPY config/wm/waybar-style.css /etc/xdg/labwc/waybar-style.css
+COPY config/wm/wofi-toggle.sh /etc/xdg/labwc/wofi-toggle.sh
+COPY config/wm/chromium-window.sh /usr/local/bin/chromium-window
+RUN chmod +x /etc/xdg/labwc/autostart /etc/xdg/labwc/wofi-toggle.sh /usr/local/bin/chromium-window
+
+# The launcher (wofi's drun mode) lists every .desktop entry. Ours replaces the stock
+# chromium.desktop, which starts a second Chrome on a different profile and without
+# --no-sandbox, so it dies at once as root. Everything else is hidden too: the packages
+# above bring in entries like avahi-discover, qv4l2 and pinentry-qt that are noise here.
+# NoDisplay only hides; MIME associations still work.
+RUN printf '[Desktop Entry]\nVersion=1.0\nName=Chromium\nGenericName=New window\nExec=chromium-window %%U\nTerminal=false\nIcon=chromium\nType=Application\nCategories=Network;WebBrowser;\nMimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n' \
+      > /usr/share/applications/code-docker-chrome.desktop \
+    && for f in /usr/share/applications/*.desktop; do \
+         case "${f##*/}" in code-docker-chrome.desktop|thunar.desktop) continue ;; esac; \
+         grep -q '^NoDisplay=true' "$f" || sed -i '0,/^\[Desktop Entry\]$/s//&\nNoDisplay=true/' "$f"; \
+       done \
+    && test "$(grep -L '^NoDisplay=true' /usr/share/applications/*.desktop | xargs -n1 basename | sort | tr '\n' ' ')" = "code-docker-chrome.desktop thunar.desktop " \
+    && update-desktop-database /usr/share/applications
+
+# Thunar is the file manager - Chrome's "Show in folder" asks D-Bus for
+# org.freedesktop.FileManager1, which Thunar provides - and opens directories.
+# Links and HTML files opened from Thunar go back to the running Chrome. Written to the
+# system-wide /etc/xdg/mimeapps.list rather than with `xdg-mime default`, which writes
+# under $HOME/.config and fails when that doesn't exist yet.
+RUN printf '[Default Applications]\ninode/directory=thunar.desktop\ntext/html=code-docker-chrome.desktop\nx-scheme-handler/http=code-docker-chrome.desktop\nx-scheme-handler/https=code-docker-chrome.desktop\n' \
+      > /etc/xdg/mimeapps.list \
+    && test "$(grep -lx 'Name=org.freedesktop.FileManager1' /usr/share/dbus-1/services/*.service)" \
+         = /usr/share/dbus-1/services/org.xfce.Thunar.FileManager1.service
+# Titlebar buttons for Chromium's own titlebar and Thunar's. GNOME's default layout is
+# close-only, and with XDG_CURRENT_DESKTOP=GNOME (entrypoint.sh) GTK takes it from the
+# portal's GSettings rather than from gtk-3.0/settings.ini, so the schema default is
+# what has to change. Minimize matters most: the taskbar is how a window comes back.
+RUN printf "[org.gnome.desktop.wm.preferences]\nbutton-layout='appmenu:minimize,maximize,close'\n" \
+      > /usr/share/glib-2.0/schemas/90_code-docker-chrome.gschema.override \
+    && glib-compile-schemas /usr/share/glib-2.0/schemas \
+    && test "$(gsettings get org.gnome.desktop.wm.preferences button-layout)" = "'appmenu:minimize,maximize,close'"
+
+# chromium-service.sh's --host-resolver-rules is on Chromium's list of flags it warns
+# about, as an infobar on every window that survives being dismissed only until the next
+# one. The flag is the design here (see that script), so the warning is noise. Policy is
+# the only switch for it; the cost is a "Managed by your organization" line in Chrome's
+# menu.
+RUN mkdir -p /etc/chromium/policies/managed \
+    && printf '{"CommandLineFlagSecurityWarningsEnabled": false}\n' \
+      > /etc/chromium/policies/managed/code-docker-chrome.json
+
 COPY entrypoint.sh /etc/code-docker-chrome/entrypoint.sh
 RUN chmod +x /etc/code-docker-chrome/entrypoint.sh /etc/code-docker-chrome/*-service.sh
 

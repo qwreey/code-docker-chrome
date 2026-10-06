@@ -1,14 +1,27 @@
 <?xml version="1.0"?>
-<!-- Minimal labwc config. There is exactly one application here and it starts
-     maximized, so this only needs to not get in the way: no decorations to waste
-     pixels over VNC, and no keybindings that could close the only window. -->
+<!-- labwc config for the headless desktop: a floating WM with labwc's stock bindings,
+     a taskbar (autostart) and the right-click menu in menu.xml.
+
+     KEEP THE <default /> ELEMENTS. labwc loads its built-in keybind and mousebind tables
+     only when this file declares none of its own in that category: one <mousebind>
+     replaces the whole default mouse table instead of adding to it. That loses titlebar
+     dragging, the titlebar buttons, border resizing and double-click maximize; one
+     <keybind> loses A-F4 (close), A-Space (window menu), A-Tab and W-arrows (snap).
+     <default /> loads the built-ins explicitly, so everything below is additive. -->
 <labwc_config>
   <theme>
     <cornerRadius>0</cornerRadius>
   </theme>
-  <windowRules>
-    <windowRule identifier="*">
-      <serverDecoration>no</serverDecoration>
-    </windowRule>
-  </windowRules>
+  <keyboard>
+    <default />
+    <keybind key="W-q">
+      <action name="Close"/>
+    </keybind>
+    <keybind key="W-f">
+      <action name="ToggleMaximize"/>
+    </keybind>
+  </keyboard>
+  <mouse>
+    <default />
+  </mouse>
 </labwc_config>

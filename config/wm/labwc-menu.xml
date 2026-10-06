@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The desktop's right-click menu. Defined here because labwc's built-in one carries
+     "Exit", which stops labwc - and critical-watchdog then shuts the whole container
+     down, taking the CDP session with it. -->
+<openbox_menu>
+  <menu id="root-menu" label="Menu">
+    <item label="New Chromium window">
+      <action name="Execute" command="chromium-window"/>
+    </item>
+    <item label="Files">
+      <action name="Execute" command="thunar"/>
+    </item>
+  </menu>
+</openbox_menu>

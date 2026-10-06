@@ -6,6 +6,12 @@ studio-docker 쪽 변경도 싱크가 안 된 상태라 나중에 한 번 작업
 
 ## 1. roblox-studio-docker에서 가져와야 할 변경 (싱크 누락)
 
+**완료 (2026-10-07).** taskbar, wofi 토글, labwc 기본 바인딩, Thunar를 가져왔고, 메뉴와
+xdg-open에서 Chrome을 여는 `chromium-window`, 제목줄 최소화/최대화 버튼을 더했다.
+지금 구조는 `CLAUDE.md`의 "The desktop"이 기준이다. 공통 서비스 스크립트(dbus, wayvnc,
+watchdog, dns-local, wait-for-wayland)는 대조해 보니 이쪽이 이미 따로 정리돼 있어 가져올 게
+없었고, 나머지 차이(pointer-warp, desktop-resize, noVNC)는 Studio 전용이다. 아래는 당시 목록이다.
+
 이 레포는 roblox-studio-docker의 관례를 따라 만들었지만(`CLAUDE.md` 참고), 그쪽이
 그 뒤에 고친 것들이 여기엔 없다. 확인할 커밋(roblox-studio-docker):
 

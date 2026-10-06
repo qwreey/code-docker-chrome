@@ -199,6 +199,28 @@ closing the last window is ordinary; `autorestart=true` brings it back. Killing 
 container over it would make the GUI a trap. A compositor dying is different — nothing
 can be fixed from the inside.
 
+## The desktop
+
+A person reaches the same session over VNC, so the screen is a small desktop rather than a
+bare window. It is roblox-studio-docker's desktop, minus Studio; `config/wm/` lands in
+`/etc/xdg/labwc/`.
+
+- **labwc** with its stock bindings (A-F4, A-Tab, titlebar drag and buttons) plus W-q and
+  W-f. `labwc-rc.xml` must keep its `<default />` elements; why is in the file.
+- **waybar** at the bottom: launcher (wofi, toggled by `wofi-toggle.sh`), window list,
+  clock. Chromium is started `--start-maximized` and labwc keeps it above the bar.
+- **The right-click menu** (`labwc-menu.xml`) replaces labwc's built-in one, whose "Exit"
+  would stop labwc and so, through critical-watchdog, the container.
+- **Every way of opening Chrome goes through `chromium-window`**: the launcher entry, the
+  menu and xdg-open (http, https, text/html). It only hands a new window to the Chrome
+  supervisord runs; a second Chrome on the profile would break the next restart of the
+  real one. The stock `chromium.desktop` and every other entry except ours and Thunar's
+  are `NoDisplay`, which the Dockerfile checks.
+- **Thunar** is the file manager: directories, and Chrome's "Show in folder" through
+  D-Bus `org.freedesktop.FileManager1`.
+- Titlebar buttons come from the GSettings schema override in the Dockerfile, not from
+  GTK's `settings.ini`, which GTK ignores here (see the comment there).
+
 ## cdp-bridge is built twice
 
 Same `cdp-bridge/main.go`, two places:

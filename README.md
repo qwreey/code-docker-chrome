@@ -1,7 +1,7 @@
 # code-docker-chrome
 
-> **⚠️ 실험 단계 (2026-10).** 운영 환경에서 오래 써 보지 않았습니다. VNC 화면의
-> taskbar, 전체 경로 테스트, 확장 개발 기반이 아직 남아 있습니다. 계획은
+> **⚠️ 실험 단계 (2026-10).** 운영 환경에서 오래 써 보지 않았습니다. 전체 경로 테스트와
+> 확장 개발 기반이 아직 남아 있습니다. 계획은
 > [`.claude/backlog/next-pass-plan.md`](.claude/backlog/next-pass-plan.md)에 있습니다.
 
 [code-docker](https://github.com/qwreey/code-docker)에 **Chrome을 물리기 위한 프로바이더**입니다.
@@ -67,6 +67,16 @@ chrome-ports rm 5173
 - 포워딩한 포트는 Chrome이 여는 **모든 페이지**에서 닿습니다. 다 쓴 것은 지우세요.
 - 같은 표를 webmanager의 "Chrome ports" 화면에서도 보고 고칠 수 있습니다.
 - 표는 `chrome-front` 볼륨에 저장되어 재생성 후에도 남습니다. 1024 미만 포트는 안 됩니다.
+
+## VNC 화면
+
+roblox-studio-docker와 같은 작은 데스크톱입니다.
+
+- 아래 taskbar: **☰ Menu**(Chromium, Thunar), 창 목록(최소화한 창은 여기서 다시 엽니다), 시계.
+- 바탕화면 우클릭 메뉴: 새 Chromium 창, 파일 관리자(Thunar).
+- 창 닫기는 제목줄 X나 Alt+F4. labwc 기본 단축키(Alt+Tab, Super+방향키)도 그대로입니다.
+- Chrome의 마지막 창을 닫으면 곧바로 새로 뜹니다. 에이전트가 쓰는 브라우저라 항상 하나는 떠 있습니다.
+- 다운로드는 `/root/Downloads`로 갑니다. 컨테이너 안이라 **재생성하면 사라집니다.**
 
 ## 구조
 

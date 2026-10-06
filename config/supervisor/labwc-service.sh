@@ -23,4 +23,8 @@ set -eu
     2>/dev/null || true
 ) &
 
+# Everything started from the desktop (launcher, menu) inherits labwc's working
+# directory, and supervisord's is /. A file manager opening at / is not where anyone
+# wants to start.
+cd "${HOME}"
 exec labwc

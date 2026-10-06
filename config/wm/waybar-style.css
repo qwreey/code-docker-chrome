@@ -1,0 +1,48 @@
+* {
+  font-family: sans-serif;
+  font-size: 13px;
+  min-height: 0;
+}
+
+window#waybar {
+  background: #1e1e2e;
+  color: #cdd6f4;
+}
+
+#custom-launcher {
+  padding: 0 14px;
+  background: #313244;
+  font-weight: bold;
+}
+
+#taskbar {
+  padding: 0 4px;
+}
+
+#taskbar button {
+  padding: 0 10px;
+  margin: 3px 2px;
+  background: #313244;
+  border-radius: 4px;
+}
+
+#taskbar button.active {
+  background: #585b70;
+}
+
+/* The window-list titles need an explicit colour: GTK's own button styling wins over
+   the `color` inherited from window#waybar, and dims the label of every *unfocused*
+   entry to nearly the button's own background — the title of the focused window was
+   readable, every other window in the list looked like a blank button. */
+#taskbar button label {
+  color: #cdd6f4;
+}
+
+#taskbar button.active label {
+  color: #ffffff;
+  font-weight: bold;
+}
+
+#clock {
+  padding: 0 14px;
+}
