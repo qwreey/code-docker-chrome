@@ -50,7 +50,18 @@ fi
 # own, so cdp-wrap in front of it is the only thing that should ever be listening on a
 # network. Chrome 136+ also refuses --remote-debugging-port without an explicit
 # --user-data-dir, which the profile dir above satisfies.
+# localhost goes to chrome-front, which relays only the ports in its forward table to dev
+# servers on code-docker or dind (chrome-front/main.go). Mapping the name rather than
+# proxying keeps the page's origin http://localhost:<port>, so it stays a secure context
+# and dev servers' Host checks (Vite's allowedHosts) pass - measured with Chromium 151. A
+# PAC file can't do this: Chrome ignores a PAC answer for localhost.
+LOCALHOST_ARGS=()
+if [[ -n "${CHROME_LOCALHOST_HOST:-}" ]]; then
+  LOCALHOST_ARGS=(--host-resolver-rules="MAP localhost ${CHROME_LOCALHOST_HOST}")
+fi
+
 exec chromium \
+  "${LOCALHOST_ARGS[@]}" \
   --no-sandbox \
   --ozone-platform=wayland \
   --user-data-dir="${CHROME_PROFILE_DIR}" \

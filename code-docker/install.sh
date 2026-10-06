@@ -93,9 +93,11 @@ Done. Check it reached Chrome:
 
     curl -s http://127.0.0.1:9222/json/version
 
-Then register the MCP server (once per project, or -s user for all of them):
+Then register the MCP server (once per project, or -s user for all of them). It runs
+through mcp-notice.py, which tells the agent how to reach dev servers from this Chrome
+(chrome-ports) - re-register an older registration to get that:
 
-    claude mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest --browser-url http://127.0.0.1:9222
+    claude mcp add chrome-devtools -- python3 /run/code-docker-chrome/code-docker/mcp-notice.py npx -y chrome-devtools-mcp@latest --browser-url http://127.0.0.1:9222
 
 The browser itself is visible in router's VNC tab; add chrome-vnc:5900 there as a
 target. Claude drives that same browser over CDP, so a login you complete by hand in

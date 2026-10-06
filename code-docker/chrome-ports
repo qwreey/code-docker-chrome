@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Let Chrome open a dev server as http://localhost:<port>.
+
+Chrome resolves localhost to chrome-front, which listens only on the ports in its forward
+table and relays each to its target (code-docker by default, or any host:port reachable
+from code-docker-internal, such as dind:8080). This edits that table.
+
+  chrome-ports                      list forwards
+  chrome-ports add 5173             localhost:5173 in Chrome -> code-docker:5173
+  chrome-ports add 8080 dind:8080   ... -> a dev server published inside dind
+  chrome-ports rm 5173
+
+Every page Chrome opens can reach a forwarded port, so remove forwards you're done with.
+"""
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+URL = os.environ.get("CHROME_FRONT_URL", "http://chrome-front:8090")
+
+
+def call(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(f"{URL}{path}", data=data, method=method,
+                                     headers={"Content-Type": "application/json"} if data else {})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            raw = response.read()
+            return json.loads(raw) if raw else None
+    except urllib.error.HTTPError as error:
+        try:
+            message = json.loads(error.read()).get("error", error.reason)
+        except ValueError:
+            message = error.reason
+        sys.exit(f"chrome-ports: {message}")
+    except OSError as error:
+        sys.exit(f"chrome-ports: can't reach {URL} ({error}) - is code-docker-chrome up?")
+
+
+def show(forwards):
+    if not forwards:
+        print("no forwards - Chrome can't reach any dev server yet (chrome-ports add <port>)")
+        return
+    for f in forwards:
+        status = ("not listening: " + f.get("lastError", "")) if not f["listening"] \
+            else ("target unreachable: " + f["lastError"]) if f.get("lastError") \
+            else f"{f['connections']} connection(s)"
+        note = f"  ({f['note']})" if f.get("note") else ""
+        print(f"localhost:{f['port']} -> {f['target']}  [{status}]{note}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
+                                     formatter_class=argparse.RawDescriptionHelpFormatter,
+                                     epilog=__doc__.split("\n\n", 1)[1])
+    sub = parser.add_subparsers(dest="command")
+    sub.add_parser("list", help="list forwards (the default)")
+    add = sub.add_parser("add", help="forward localhost:<port> in Chrome to a target")
+    add.add_argument("port", type=int)
+    add.add_argument("target", nargs="?", default="", help="host:port (default code-docker:<port>)")
+    add.add_argument("--note", default="")
+    remove = sub.add_parser("rm", help="remove a forward")
+    remove.add_argument("port", type=int)
+    parser.add_argument("--json", action="store_true", help="print the API's JSON")
+    args = parser.parse_args()
+
+    if args.command == "add":
+        result = call("POST", "/api/forwards", {"port": args.port, "target": args.target, "note": args.note})
+        if args.json:
+            print(json.dumps(result, indent=2))
+        else:
+            show([result])
+        return 0
+    if args.command == "rm":
+        call("DELETE", f"/api/forwards/{args.port}")
+        print(f"removed localhost:{args.port}")
+        return 0
+    result = call("GET", "/api/forwards")
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        show(result["forwards"])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

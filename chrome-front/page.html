@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chrome ports</title>
+<style>
+  /* Plain on purpose: this page is usually shown inside webmanager's frame. */
+  :root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; }
+  body { margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 16px; opacity: .8; }
+  code { font-family: ui-monospace, monospace; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+  th { font-weight: 600; font-size: 12px; opacity: .7; }
+  td.actions { text-align: right; white-space: nowrap; width: 1%; }
+  .error { color: #d33; }
+  .muted { opacity: .6; }
+  form { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+  label { display: flex; flex-direction: column; font-size: 12px; gap: 2px; }
+  input { font: inherit; padding: 4px 6px; }
+  button { font: inherit; padding: 4px 10px; cursor: pointer; }
+  #message { min-height: 1.5em; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Chrome ports</h1>
+<p class="lead">
+  Chrome opens <code>http://localhost:&lt;port&gt;</code> on the target below. Only these ports are
+  reachable from Chrome; every page Chrome opens can reach them too.
+</p>
+<table>
+  <thead><tr><th>localhost port</th><th>Target</th><th>Note</th><th>Status</th><th></th></tr></thead>
+  <tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+</table>
+<form id="add">
+  <label>Port <input name="port" type="number" min="1024" max="65535" required placeholder="5173"></label>
+  <label>Target <input name="target" placeholder="code-docker:5173 (default)" size="24"></label>
+  <label>Note <input name="note" maxlength="200" size="24"></label>
+  <button type="submit">Add</button>
+</form>
+<div id="message"></div>
+<script>
+// Relative URLs throughout: inside webmanager this page is served under a path prefix.
+const rows = document.getElementById("rows");
+const message = document.getElementById("message");
+
+function cell(text, className) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (className) td.className = className;
+  return td;
+}
+
+async function call(method, path, body) {
+  const response = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = response.status === 204 ? null : await response.json();
+  if (!response.ok) throw new Error((data && data.error) || response.statusText);
+  return data;
+}
+
+async function refresh() {
+  let data;
+  try {
+    data = await call("GET", "api/forwards");
+  } catch (error) {
+    rows.replaceChildren();
+    const tr = document.createElement("tr");
+    tr.append(cell("Could not load: " + error.message, "error"));
+    rows.append(tr);
+    return;
+  }
+  rows.replaceChildren();
+  if (data.forwards.length === 0) {
+    const tr = document.createElement("tr");
+    const td = cell("No forwards. Chrome can reach no dev server yet.", "muted");
+    td.colSpan = 5;
+    tr.append(td);
+    rows.append(tr);
+  }
+  for (const f of data.forwards) {
+    const tr = document.createElement("tr");
+    const status = !f.listening ? "not listening: " + f.lastError
+      : f.lastError ? "target unreachable: " + f.lastError
+      : f.connections + " connection(s)";
+    const actions = document.createElement("td");
+    actions.className = "actions";
+    const remove = document.createElement("button");
+    remove.textContent = "Remove";
+    remove.onclick = async () => {
+      try { await call("DELETE", "api/forwards/" + f.port); } catch (error) { message.textContent = error.message; }
+      refresh();
+    };
+    actions.append(remove);
+    tr.append(cell(String(f.port)), cell(f.target), cell(f.note || ""),
+      cell(status, f.listening && !f.lastError ? "" : "error"), actions);
+    rows.append(tr);
+  }
+}
+
+document.getElementById("add").onsubmit = async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  try {
+    const f = await call("POST", "api/forwards", {
+      port: Number(form.get("port")), target: form.get("target"), note: form.get("note"),
+    });
+    message.textContent = "localhost:" + f.port + " → " + f.target;
+    event.target.reset();
+  } catch (error) {
+    message.textContent = error.message;
+  }
+  refresh();
+};
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

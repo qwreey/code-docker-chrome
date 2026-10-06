@@ -33,6 +33,11 @@ studio-docker 쪽 변경도 싱크가 안 된 상태라 나중에 한 번 작업
 
 ## 3. 망 분리 — Chrome이 `code-docker-internal`에 직접 붙어 있는 문제
 
+**완료 (2026-10-06).** 아래 계획과 달리 `cdp-bridge wrap`을 떼지 않고 `chrome-front`(Go) 하나가
+CDP 중계, dev 포트 포워딩(동적 표), 관리 API를 맡는 모양이 됐다. dev 서버 경로는 고정 포트
+목록 대신 `chrome-ports`로 에이전트가 관리하고 Chrome에서는 `localhost`로 연다. 지금 구조는
+`CLAUDE.md`의 "Three networks"와 "chrome-front and `localhost`"가 기준이고, 아래는 당시 조사 기록이다.
+
 code-docker-firecrawl을 만들며 정리한 위협 모델 (code-docker의
 `.claude/archive/repo-restructure-plan-done.md` 이후 firecrawl 작업 참고):
 

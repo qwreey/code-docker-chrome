@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A **provider**: a container that attaches a Chrome browser to
 [code-docker](https://github.com/qwreey/code-docker). There is no application source
 here — it is infrastructure/config (Dockerfile, compose overlay, shell service scripts)
-plus one small Go program, `cdp-bridge/`.
+plus two small Go programs, `cdp-bridge/` and `chrome-front/`.
 
 The thing that makes it worth existing is not "Chrome in Docker" — several good images
 already do that — but that **one browser is reachable two ways at once**: an agent
@@ -42,19 +42,20 @@ it, and that look like oversights if you don't know why:
 ## Architecture
 
 ```
-[code-docker]                                  [code-docker-chrome]
+[code-docker]                   [chrome-front]                 [code-docker-chrome]
 chrome-devtools-mcp
   --browser-url http://127.0.0.1:9222
         │  Host: 127.0.0.1:9222
         ▼
-  cdp-bridge unwrap (loopback)                 cdp-bridge wrap (chrome-cdp:9223)
-    + Authorization: Bearer $TOKEN  ──────────▶   verify bearer, strip it
-    Host passed through                              │ Host passed through
-                                                     ▼
-                                              Chrome (127.0.0.1:9222)
-                                              labwc + wayvnc
-                                                     │
-                               chrome-vnc:5900 ──────┴──▶ code-docker-router ──▶ person
+  cdp-bridge unwrap (loopback)
+    + Bearer $TOKEN ──────────▶ chrome-cdp:9223 ─(TCP)─▶ cdp-bridge wrap (chrome-browser:9223)
+    Host passed through                                    verify bearer, strip it
+                                                                 ▼
+                                                          Chrome (127.0.0.1:9222)
+  dev server :5173 ◀─────────── forward table ◀───────── Chrome: http://localhost:5173
+  chrome-ports ───────────────▶ :8090 API + page          labwc + wayvnc
+                                                                 │
+                                         chrome-vnc:5900 ────────┴──▶ code-docker-router ──▶ person
 ```
 
 ### Host passthrough is the mechanism, not an implementation detail
@@ -74,28 +75,92 @@ Two consequences:
   token. That is expected; the supported path never sends such a Host. Debug with
   `curl -H "Host: 127.0.0.1:9222"`.
 
-### Two networks, for opposite reasons
+### Three networks
 
 | Network | Members | Shape |
 |---|---|---|
-| `code-docker-internal` | chrome, code-docker, dind, … | **reused as-is**; CDP is gated by a token |
-| `chrome-vnc` (`internal: true`) | chrome, router | **its own**; a subtraction — code-docker is excluded |
+| `chrome-net` (`internal: true`) | chrome, chrome-front, router (gateway) | Chrome's own network |
+| `code-docker-internal` | chrome-front (alias `chrome-cdp`), code-docker, dind, … | Chrome is **not** on it |
+| `chrome-vnc` (`internal: true`) | chrome, router | screen to a person only |
 
-A dedicated CDP network was considered and **rejected**: code-docker would have to join
-it, which would make a provider edit the main project's topology. The token gets the same
-result without that. Verified: dind is on `code-docker-internal` and *can* reach chrome by
-IP — and gets 401.
+- **Chrome is off code-docker-internal.** It runs any site's JavaScript. On
+  code-docker-internal that JavaScript reached dind's unauthenticated `:2375` and
+  code-docker's nginx (code-server, and webmanager with its opt-in login). Chrome's
+  Local Network Access prompt is no wall: one click, or one CDP permission grant, and it
+  sticks to the profile.
+- **chrome-front is the only bridge**, and it carries three things:
+  - CDP from code-docker. It takes over the `chrome-cdp` alias, so cdp-unwrap's
+    upstream is unchanged.
+  - Forwarded dev-server ports from Chrome.
+  - The forward table's API.
+- **Measured on the test stack**, from Chrome's container:
+  - code-docker's and dind's internal IPs time out, because router drops them.
+  - `router:80` and chrome-front's API are refused.
+  - `code-docker` and `dind` don't resolve.
+  - The internet answers 200.
+- **The VNC network is a subtraction**, the same pattern roblox-studio-docker uses. Only
+  router joins it, so screen access never becomes a second unaudited control path beside
+  CDP.
+- **Listeners bind one network each.** cdp-wrap binds the `chrome-browser` alias, which
+  exists on chrome-net only, and wayvnc binds `chrome-vnc`. Both resolve with `getent`
+  and **fail closed** rather than binding `0.0.0.0` (`config/supervisor/resolve-bind-alias.sh`).
+- **Both private networks carry `netinit.provider` and `netinit.exempt-forward`.**
+  Matching is fail-closed, so `exempt-forward` alone is inert. Only `chrome-net` declares
+  `netinit.gateway`: a relay path to a person is not an egress path.
 
-The VNC network is the opposite shape, and is the same pattern roblox-studio-docker uses:
-only router joins, so screen access never becomes a second unaudited control path beside
-CDP. Both listeners resolve a per-network alias with `getent` and **fail closed** rather
-than binding `0.0.0.0` (`config/supervisor/resolve-bind-alias.sh`); a silent fallback
-would undo exactly this split.
+### chrome-front and `localhost`
 
-`chrome-vnc` carries **both** netinit labels. `netinit.provider` is what opts a network in
-to the agent at all — matching is fail-closed, so `netinit.exempt-forward` alone is
-inert and the DOCKER-USER exemption silently never applies. `netinit.gateway` is
-deliberately absent: a relay path to a person is not an egress path.
+Chromium runs with `--host-resolver-rules="MAP localhost chrome-front"`
+(`CHROME_LOCALHOST_HOST`). `http://localhost:5173` therefore connects to chrome-front
+port 5173, while the page's origin stays `http://localhost:5173`:
+
+- It is a **secure context** (measured: `isSecureContext` true).
+- Dev servers' Host checks, such as Vite's `allowedHosts`, see `localhost` and pass.
+
+**Rejected:**
+
+- **PAC** that sends only localhost to a proxy. Chromium 151 ignores a PAC answer for
+  localhost, even with `--proxy-bypass-list=<-loopback>` (measured).
+- **A manual proxy plus `<-loopback>`.** It does route localhost through the proxy, but
+  everything else too. chrome-front would become the browser's whole egress path.
+
+`chrome-front/main.go`:
+
+- **Listens on chrome-net** only for the ports in its forward table, and relays each to
+  its target. The target is `code-docker:<port>` by default, or any `host:port` reachable
+  from code-docker-internal, such as `dind:8080`.
+  - Ports not in the table aren't listened on. A page can't reach Chrome's own DevTools
+    port by `localhost:9222` either (measured: an error page).
+  - The table persists in the `chrome-front-data` volume.
+  - Ports must be ≥ 1024: the container drops every capability and runs as 65534.
+- **The API and page** (`GET/POST /api/forwards`, `DELETE /api/forwards/{port}`, `GET /`)
+  listen on **code-docker-internal only**.
+  - On chrome-net, any page Chrome opens could add forwards through
+    `http://localhost:8090`.
+  - The API has no token. Reaching code-docker-internal is already more than a forward
+    grants.
+- **Bind addresses** come from network-qualified names (`<container>.<network>`, which
+  Docker's DNS answers). A bare name can resolve to either of its two addresses. Failing
+  to resolve is fatal; there's no `0.0.0.0` fallback.
+- **The CDP relay** is plain TCP, so cdp-bridge's Host passthrough (below) is
+  untouched.
+
+**Agents use it** through `chrome-ports` (`code-docker/chrome-ports`, mounted into
+code-docker as `/usr/local/bin/chrome-ports`).
+
+- They learn about it from `code-docker/mcp-notice.py`, which `install.sh` tells people
+  to wrap chrome-devtools-mcp in. It appends `chrome-devtools-notice.md` to the MCP
+  `instructions` (same filter as roblox-studio-docker's `config/mcp/mcp-shared-notice.py`).
+- People see the same table in webmanager. The overlay sets
+  `WEBMANAGER_PROVIDER_CHROME` on code-docker, and webmanager proxies the page (see
+  webmanager's CLAUDE.md).
+
+**Verified on the test stack** with the real Chrome, opening tabs over CDP:
+
+- Before a forward, `http://localhost:5173` gave an error page.
+- After `chrome-ports add 5173`, the page served by code-docker loaded with
+  `isSecureContext` true and origin `http://localhost:5173`.
+- A forward to `dind:18080` reached an nginx running inside dind.
 
 ## Chrome runs with `--no-sandbox`
 
@@ -180,9 +245,13 @@ Attached through `ootb-manifest.env` → code-docker's `ootb.sh`/`migrate.sh`, w
 `.env.router`'s `ROUTER_EXTRA_ALLOWED_TARGET_HOSTS`, and generates `CHROME_CDP_TOKEN`.
 code-docker never learns this project's name.
 
-The overlay also merges into services it does not define — that is how the token reaches
-`code-docker`, how `install.sh` reaches it (a read-only mount at
-`/run/code-docker-chrome/`), and how router joins `chrome-vnc`. Include merging is by
+The overlay also merges into services it does not define. That is how:
+
+- the token reaches `code-docker`;
+- `install.sh` and `chrome-ports` reach it (a read-only mount at
+  `/run/code-docker-chrome/`, plus a fixed launcher at `/usr/local/bin/chrome-ports`);
+- webmanager learns about chrome-front's page (`WEBMANAGER_PROVIDER_CHROME`);
+- router joins `chrome-vnc` and `chrome-net`. Include merging is by
 service name and has no "only services this file defines" restriction.
 
 `install.sh` depends on a code-docker new enough to have the on-volume supervisord include
