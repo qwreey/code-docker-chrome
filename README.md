@@ -1,7 +1,7 @@
 # code-docker-chrome
 
-> **⚠️ 실험 단계 (2026-10).** 운영 환경에서 오래 써 보지 않았습니다. 전체 경로 테스트와
-> 확장 개발 기반이 아직 남아 있습니다. 계획은
+> **⚠️ 아직 쓰지 마세요 (실험 단계, 2026-10).** 전체 경로를 끝까지 시험하지 않았고, 운영
+> 환경에서 써 본 적도 없습니다. 남은 일(전체 경로 테스트, 확장 개발 기반)의 계획은
 > [`.claude/backlog/next-pass-plan.md`](.claude/backlog/next-pass-plan.md)에 있습니다.
 
 [code-docker](https://github.com/qwreey/code-docker)에 **Chrome을 물리기 위한 프로바이더**입니다.
