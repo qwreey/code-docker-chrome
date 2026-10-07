@@ -127,8 +127,8 @@ port 5173, while the page's origin stays `http://localhost:5173`:
 `chrome-front/main.go`:
 
 - **Listens on chrome-net** only for the ports in its forward table, and relays each to
-  its target. The target is `code-docker:<port>` by default, or any `host:port` reachable
-  from code-docker-internal, such as `dind:8080`.
+  its target: `code-docker:<port>` by default, or a server published inside dind, such
+  as `dind:8080`.
   - Ports not in the table aren't listened on. A page can't reach Chrome's own DevTools
     port by `localhost:9222` either (measured: an error page).
   - The table persists in the `chrome-front-data` volume.
@@ -139,6 +139,16 @@ port 5173, while the page's origin stays `http://localhost:5173`:
     `http://localhost:8090`.
   - The API has no token. Reaching code-docker-internal is already more than a forward
     grants.
+- **Targets are limited** (`targetPolicy`), because a forward serves every page Chrome
+  opens, not only the dev tool it was added for. A forward to `dind:2375` would hand any
+  site the unauthenticated Docker API, guarded only by the Local Network Access prompt.
+  - Only addresses of `FRONT_TARGET_HOSTS` (code-docker, dind). That keeps out router,
+    other siblings and chrome-front's own API.
+  - Never `FRONT_DENY_TARGETS`: code-docker's nginx (80) and WebDAV, dind's Docker API.
+  - Compared by resolved address, so an IP literal or another alias doesn't get around
+    it. Checked when a forward is added (400) and on every connection, since a name can
+    point elsewhere after a recreate. The decision is in `main_test.go`, which the image
+    build runs.
 - **Bind addresses** come from network-qualified names (`<container>.<network>`, which
   Docker's DNS answers). A bare name can resolve to either of its two addresses. Failing
   to resolve is fatal; there's no `0.0.0.0` fallback.

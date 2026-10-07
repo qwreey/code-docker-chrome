@@ -1,8 +1,10 @@
 # chrome-front: the bridge between chrome-net and code-docker-internal (see main.go).
 FROM golang:1.27-alpine AS build
 WORKDIR /src
-COPY go.mod main.go page.html ./
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /chrome-front .
+COPY go.mod main.go main_test.go page.html ./
+# The tests cover which forward targets are refused; a build that breaks them fails here.
+RUN go vet ./... && CGO_ENABLED=0 go test ./... \
+    && CGO_ENABLED=0 go build -ldflags="-s -w" -o /chrome-front .
 
 FROM alpine:3.22
 # /data holds forwards.json (a named volume); owned by the unprivileged user it runs as,

@@ -104,6 +104,12 @@ services:
       FRONT_INTERNAL_NAME: "${PREFIX:-}code-docker-chrome-front.${PREFIX:-}code-docker-internal"
       FRONT_CHROME_NAME: "${PREFIX:-}code-docker-chrome-front.${PREFIX:-}code-docker-chrome-net"
       FRONT_CDP_UPSTREAM: "chrome-browser:9223"
+      # Where forwards may point, checked by resolved address (main.go's targetPolicy).
+      # Every page Chrome opens can use a forward, so the deny list holds code-docker's
+      # nginx (code-server and webmanager, no login by default) and WebDAV, and dind's
+      # unauthenticated Docker API. The WebDAV port follows code-docker's own setting.
+      FRONT_TARGET_HOSTS: "code-docker dind"
+      FRONT_DENY_TARGETS: "code-docker:80 code-docker:${NGINX_WEBDAV_PORT:-82} dind:2375 dind:2376"
     networks:
       # code-docker's cdp-bridge unwrap dials chrome-cdp:9223, which is this container now.
       code-docker-internal:

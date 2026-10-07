@@ -11,6 +11,12 @@
 //     5173. Each port in the forward table is relayed to its target (code-docker:5173,
 //     dind:8080, ...). Ports not in the table aren't listened on at all.
 //
+// A forward is reachable by every page Chrome opens, not only by the dev tool it was
+// added for, so targetPolicy limits where one may point: only at code-docker and dind
+// (FRONT_TARGET_HOSTS), and never at the ports on them that are control planes rather
+// than dev servers (FRONT_DENY_TARGETS). Both are checked by resolved address, when a
+// forward is added and again on every connection.
+//
 // The forward table is managed over a small HTTP API, plus a page for people, served on
 // code-docker-internal only. Serving it on chrome-net too would let any page Chrome opens
 // add forwards through http://localhost:<api port>. webmanager shows the page as a
@@ -29,6 +35,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,7 +73,67 @@ type table struct {
 	mu        sync.Mutex
 	bindIP    string
 	stateFile string
+	policy    *targetPolicy
 	forwards  map[int]*activeForward
+}
+
+var errUnresolved = errors.New("does not resolve")
+
+// targetPolicy decides which addresses a forward may reach. It compares resolved
+// addresses, not target strings, so an IP literal or another alias of a denied host
+// is caught too.
+type targetPolicy struct {
+	hosts  []string            // names whose addresses may be targets
+	deny   map[string][]string // host name -> ports never forwarded to
+	lookup func(ctx context.Context, host string) ([]string, error)
+}
+
+func parsePolicy(hosts, deny string) (*targetPolicy, error) {
+	p := &targetPolicy{hosts: strings.Fields(strings.ReplaceAll(hosts, ",", " ")), deny: map[string][]string{}, lookup: net.DefaultResolver.LookupHost}
+	if len(p.hosts) == 0 {
+		return nil, errors.New("FRONT_TARGET_HOSTS is empty: no forward could reach anything")
+	}
+	for _, d := range strings.Fields(strings.ReplaceAll(deny, ",", " ")) {
+		host, port, err := net.SplitHostPort(d)
+		n, perr := strconv.Atoi(port)
+		if err != nil || perr != nil || n < 1 || n > 65535 {
+			return nil, fmt.Errorf("FRONT_DENY_TARGETS entry %q is not host:port", d)
+		}
+		if !slices.Contains(p.hosts, host) {
+			return nil, fmt.Errorf("FRONT_DENY_TARGETS entry %q names a host that is not in FRONT_TARGET_HOSTS", d)
+		}
+		p.deny[host] = append(p.deny[host], strconv.Itoa(n))
+	}
+	return p, nil
+}
+
+// check returns the address to dial for target, or why it is refused. The caller dials
+// exactly that address, so the name can't resolve differently between check and dial.
+func (p *targetPolicy) check(ctx context.Context, target string) (string, error) {
+	host, port, err := net.SplitHostPort(target)
+	if err != nil {
+		return "", err
+	}
+	addrs, err := p.lookup(ctx, host)
+	if err != nil || len(addrs) == 0 {
+		return "", fmt.Errorf("target host %s: %w", host, errUnresolved)
+	}
+	addr := addrs[0]
+	var names []string
+	for _, h := range p.hosts {
+		if hostAddrs, err := p.lookup(ctx, h); err == nil && slices.Contains(hostAddrs, addr) {
+			names = append(names, h)
+		}
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("target %s is not on %s; a forward can only reach dev servers there", host, strings.Join(p.hosts, " or "))
+	}
+	for _, name := range names {
+		if slices.Contains(p.deny[name], port) {
+			return "", fmt.Errorf("%s:%s is never forwarded: every page Chrome opens could use it, and it is a control plane, not a dev server", name, port)
+		}
+	}
+	return net.JoinHostPort(addr, port), nil
 }
 
 func (t *table) status() []forwardStatus {
@@ -188,9 +255,15 @@ func (t *table) relay(af *activeForward, client net.Conn, target string) {
 		delete(af.conns, client)
 		t.mu.Unlock()
 	}()
-	// Resolved per connection, so a target container that was recreated with a new IP
-	// keeps working.
-	upstream, err := net.DialTimeout("tcp", target, 5*time.Second)
+	// Resolved and checked per connection, so a target container that was recreated
+	// with a new IP keeps working, and a name that now points somewhere denied stops.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	addr, err := t.policy.check(ctx, target)
+	cancel()
+	var upstream net.Conn
+	if err == nil {
+		upstream, err = net.DialTimeout("tcp", addr, 5*time.Second)
+	}
 	if err != nil {
 		t.mu.Lock()
 		af.lastError = err.Error()
@@ -258,6 +331,15 @@ func (t *table) load() {
 			log.Printf("WARNING: skipping saved forward %d -> %s: %v", f.Port, f.Target, err)
 			continue
 		}
+		// A target that doesn't resolve right now (dind still starting) is kept; the
+		// per-connection check refuses it if it turns out to be denied.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := t.policy.check(ctx, f.Target)
+		cancel()
+		if err != nil && !errors.Is(err, errUnresolved) {
+			log.Printf("WARNING: skipping saved forward %d -> %s: %v", f.Port, f.Target, err)
+			continue
+		}
 		t.set(f)
 	}
 }
@@ -322,6 +404,10 @@ func api(t *table) http.Handler {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		if _, err := t.policy.check(r.Context(), f.Target); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusOK, t.set(f))
 	})
 	mux.HandleFunc("DELETE /api/forwards/{port}", func(w http.ResponseWriter, r *http.Request) {
@@ -375,7 +461,15 @@ func main() {
 
 	go relayCDP(net.JoinHostPort(internalIP, env("FRONT_CDP_PORT", "9223")), env("FRONT_CDP_UPSTREAM", "chrome-browser:9223"))
 
-	t := &table{bindIP: chromeIP, stateFile: filepath.Join(env("FRONT_DATA_DIR", "/data"), "forwards.json"), forwards: map[int]*activeForward{}}
+	targetHosts := env("FRONT_TARGET_HOSTS", "code-docker dind")
+	denyTargets := env("FRONT_DENY_TARGETS", "code-docker:80 code-docker:82 dind:2375 dind:2376")
+	policy, err := parsePolicy(targetHosts, denyTargets)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("forward targets: %s; never %s", targetHosts, denyTargets)
+
+	t := &table{bindIP: chromeIP, stateFile: filepath.Join(env("FRONT_DATA_DIR", "/data"), "forwards.json"), policy: policy, forwards: map[int]*activeForward{}}
 	t.load()
 
 	listen := net.JoinHostPort(internalIP, env("FRONT_API_PORT", "8090"))

@@ -65,6 +65,8 @@ chrome-ports rm 5173
   `http://localhost:<포트>`라 보안 컨텍스트로 취급되고, Vite 같은 서버의 호스트 검사도
   통과합니다.
 - 포워딩한 포트는 Chrome이 여는 **모든 페이지**에서 닿습니다. 다 쓴 것은 지우세요.
+- 같은 이유로 대상은 code-docker와 dind의 dev 서버로 제한됩니다. code-docker의 nginx(80),
+  WebDAV(82), dind의 Docker API(2375/2376)는 IP로 적어도 거절됩니다.
 - 같은 표를 webmanager의 "Chrome ports" 화면에서도 보고 고칠 수 있습니다.
 - 표는 `chrome-front` 볼륨에 저장되어 재생성 후에도 남습니다. 1024 미만 포트는 안 됩니다.
 

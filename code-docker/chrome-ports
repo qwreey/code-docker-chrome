@@ -2,8 +2,8 @@
 """Let Chrome open a dev server as http://localhost:<port>.
 
 Chrome resolves localhost to chrome-front, which listens only on the ports in its forward
-table and relays each to its target (code-docker by default, or any host:port reachable
-from code-docker-internal, such as dind:8080). This edits that table.
+table and relays each to its target: a dev server on code-docker (the default) or one
+published inside dind, such as dind:8080. This edits that table.
 
   chrome-ports                      list forwards
   chrome-ports add 5173             localhost:5173 in Chrome -> code-docker:5173
@@ -11,6 +11,8 @@ from code-docker-internal, such as dind:8080). This edits that table.
   chrome-ports rm 5173
 
 Every page Chrome opens can reach a forwarded port, so remove forwards you're done with.
+For the same reason chrome-front refuses targets elsewhere and the ports that aren't dev
+servers: code-docker's nginx (80) and WebDAV (82), dind's Docker API (2375/2376).
 """
 import argparse
 import json
