@@ -255,7 +255,8 @@ and clicking adds no reach, only the parts CDP can't do.
 
 ## cdp-bridge is built twice
 
-Same `cdp-bridge/` source, two places:
+Same `cdp-bridge/` source, two places (the image's copy also serves `cdp-bridge close`,
+chromium-service.sh's graceful stop):
 
 | Half | When | Where | Output |
 |---|---|---|---|
@@ -280,7 +281,10 @@ and needs to be on the container's PATH.
 ## Conventions
 
 - Service scripts are `#!/usr/bin/env bash` + `set -eu`, and `exec` their long-running
-  program last so supervisord's stop signal reaches it directly. Post-start work that
+  program last so supervisord's stop signal reaches it directly. The exception is
+  `chromium-service.sh`: Chrome exits on SIGTERM without flushing cookies it wrote in the
+  last ~30 s, so the script traps the signal and closes Chrome over CDP instead
+  (`cdp-bridge close`). Post-start work that
   needs the compositor goes in a background subshell before the `exec` (see
   `labwc-service.sh`).
 - Shared helpers (`wait-for-wayland.sh`, `resolve-bind-alias.sh`) are **sourced, not

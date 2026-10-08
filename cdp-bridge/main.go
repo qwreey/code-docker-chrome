@@ -62,6 +62,9 @@ func main() {
 	if mode == "screen" {
 		os.Exit(screenMain(os.Args[1:]))
 	}
+	if mode == "close" {
+		os.Exit(closeMain(os.Args[1:]))
+	}
 	listen := flag.String("listen", "", "address to listen on")
 	upstream := flag.String("upstream", "", "host:port to forward to")
 	tokenEnv := flag.String("token-env", "CHROME_CDP_TOKEN", "env var holding the shared secret")

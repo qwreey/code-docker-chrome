@@ -5,7 +5,7 @@
 FROM golang:1.27-alpine AS cdp-bridge
 WORKDIR /src
 COPY cdp-bridge/go.mod ./
-COPY cdp-bridge/main.go cdp-bridge/screen.go ./
+COPY cdp-bridge/main.go cdp-bridge/screen.go cdp-bridge/close.go ./
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /cdp-bridge .
 
 FROM archlinux

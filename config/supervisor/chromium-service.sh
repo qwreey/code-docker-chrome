@@ -60,7 +60,7 @@ if [[ -n "${CHROME_LOCALHOST_HOST:-}" ]]; then
   LOCALHOST_ARGS=(--host-resolver-rules="MAP localhost ${CHROME_LOCALHOST_HOST}")
 fi
 
-exec chromium \
+chromium \
   "${LOCALHOST_ARGS[@]}" \
   --no-sandbox \
   --ozone-platform=wayland \
@@ -72,4 +72,24 @@ exec chromium \
   --start-maximized \
   --disable-features=Translate \
   ${CHROME_EXTRA_ARGS:-} \
-  "${CHROME_START_URL:-about:blank}"
+  "${CHROME_START_URL:-about:blank}" &
+CHROME_PID=$!
+
+# Not `exec chromium`: Chrome exits on SIGTERM without flushing its cookie
+# store, which it otherwise writes about every 30 s, so a login completed in
+# the half minute before a container restart was lost (measured). On
+# supervisord's stop signal, ask Chrome to close the way closing its last
+# window does (cdp-bridge close: CDP Browser.close), which writes everything
+# first, and fall back to SIGTERM only if that fails.
+stop_chrome() {
+  cdp-bridge close -cdp "127.0.0.1:${CDP_PORT}" -timeout 8s || kill -TERM "${CHROME_PID}" 2>/dev/null || true
+}
+trap stop_chrome TERM INT
+
+# `wait` returns early when a trapped signal arrives; keep waiting until Chrome
+# itself is gone, then exit with its status so autorestart sees what Chrome did.
+status=0
+while kill -0 "${CHROME_PID}" 2>/dev/null; do
+  wait "${CHROME_PID}" && status=0 || status=$?
+done
+exit "${status}"
