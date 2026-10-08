@@ -64,6 +64,8 @@ services:
       # user who set VNC_PASSWORD got an unauthenticated wayvnc with no error at all.
       VNC_PASSWORD: "${VNC_PASSWORD:-}"
       CHROME_EXTRA_ARGS: "${CHROME_EXTRA_ARGS:-}"
+      # Whether agents see and drive the screen through the CDP token (cdp-wrap-service.sh).
+      CHROME_AGENT_VNC: "${CHROME_AGENT_VNC:-true}"
     networks:
       # Not code-docker-internal: Chrome runs arbitrary sites' JavaScript, and there
       # code-docker's nginx (code-server, webmanager with its opt-in login) and dind's
@@ -73,10 +75,11 @@ services:
       chrome-net:
         aliases:
           - chrome-browser
-      # VNC is the opposite shape - a subtraction. Only router joins, so the agent
-      # container cannot reach the screen at all, and a person gets there through
-      # router's VNC tab. Same "the border is router's alone" rule
-      # roblox-studio-docker's VNC isolation follows.
+      # VNC is the opposite shape - a subtraction. Only router joins, and a person gets
+      # there through router's VNC tab. Same "the border is router's alone" rule
+      # roblox-studio-docker's VNC isolation follows. code-docker must not join: Chrome
+      # is on this network too, so its pages could reach code-docker. Agents get the
+      # screen through the CDP token instead (cdp-wrap-service.sh).
       chrome-vnc:
         aliases:
           - chrome-vnc
@@ -148,6 +151,9 @@ services:
       # chrome-ports, the forward table's CLI. The script arrives with ./code-docker above;
       # this fixed launcher is all that's mounted as a file.
       - "./code-docker/chrome-ports-launcher.sh:/usr/local/bin/chrome-ports:ro"
+      # chrome-screen, the agent's view of the desktop: cdp-bridge's screen client
+      # against cdp-unwrap's VNC port.
+      - "./code-docker/chrome-screen-launcher.sh:/usr/local/bin/chrome-screen:ro"
 
   # Field merge into a service this file does not define - include merging is by service
   # name, already validated in code-docker. router needs to be on chrome-vnc to relay

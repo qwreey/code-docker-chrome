@@ -9,9 +9,9 @@ VNC_PORT="${VNC_PORT:-5900}"
 VNC_BIND_ALIAS="${VNC_BIND_ALIAS:-}"
 
 # Same fail-closed binding as cdp-wrap, pointed at the other network. The VNC network is
-# shared only with code-docker-router, which relays it to a person; the agent container
-# is deliberately not on it, so screen access is not a second, unaudited control path
-# next to CDP.
+# shared only with code-docker-router, which relays it to a person. Agents reach the
+# screen through cdp-wrap's token instead (cdp-wrap-service.sh), never by joining this
+# network: Chrome is on it too, and a page Chrome opens could then reach code-docker.
 if [[ -z "${VNC_BIND_ALIAS}" ]]; then
   echo "[wayvnc-service] FATAL: VNC_BIND_ALIAS is unset - refusing to bind 0.0.0.0, which would put the screen on the same network as CDP." >&2
   exit 1

@@ -12,7 +12,8 @@ plus two small Go programs, `cdp-bridge/` and `chrome-front/`.
 The thing that makes it worth existing is not "Chrome in Docker" — several good images
 already do that — but that **one browser is reachable two ways at once**: an agent
 drives it over CDP while a person watches and clicks in the same session over VNC. A
-login completed by hand is a login Claude then has.
+login completed by hand is a login Claude then has. The agent sees that screen too
+(`chrome-screen`), so what CDP can't reach doesn't have to wait for a person.
 
 ## The one structural decision to not undo
 
@@ -56,6 +57,7 @@ chrome-devtools-mcp
   chrome-ports ───────────────▶ :8090 API + page          labwc + wayvnc
                                                                  │
                                          chrome-vnc:5900 ────────┴──▶ code-docker-router ──▶ person
+  chrome-screen ─▶ unwrap 127.0.0.1:5900 ─▶ GET /.vnc + Bearer ─▶ wrap ─▶ wayvnc (same screen)
 ```
 
 ### Host passthrough is the mechanism, not an implementation detail
@@ -81,7 +83,7 @@ Two consequences:
 |---|---|---|
 | `chrome-net` (`internal: true`) | chrome, chrome-front, router (gateway) | Chrome's own network |
 | `code-docker-internal` | chrome-front (alias `chrome-cdp`), code-docker, dind, … | Chrome is **not** on it |
-| `chrome-vnc` (`internal: true`) | chrome, router | screen to a person only |
+| `chrome-vnc` (`internal: true`) | chrome, router | screen to a person |
 
 - **Chrome is off code-docker-internal.** It runs any site's JavaScript. On
   code-docker-internal that JavaScript reached dind's unauthenticated `:2375` and
@@ -99,8 +101,9 @@ Two consequences:
   - `code-docker` and `dind` don't resolve.
   - The internet answers 200.
 - **The VNC network is a subtraction**, the same pattern roblox-studio-docker uses. Only
-  router joins it, so screen access never becomes a second unaudited control path beside
-  CDP.
+  router joins it. code-docker must not: Chrome is on that network too, so its pages
+  could reach code-docker there. Agents get the screen through the CDP token instead
+  (below).
 - **Listeners bind one network each.** cdp-wrap binds the `chrome-browser` alias, which
   exists on chrome-net only, and wayvnc binds `chrome-vnc`. Both resolve with `getent`
   and **fail closed** rather than binding `0.0.0.0` (`config/supervisor/resolve-bind-alias.sh`).
@@ -231,9 +234,28 @@ bare window. It is roblox-studio-docker's desktop, minus Studio; `config/wm/` la
 - Titlebar buttons come from the GSettings schema override in the Dockerfile, not from
   GTK's `settings.ini`, which GTK ignores here (see the comment there).
 
+## The agent sees the screen
+
+CDP covers page content, not Chrome's own UI (toolbar, extension popups, permission
+prompts, menus) or the desktop around it. Without the screen, an agent hands each of
+those to a person. The screen is opened to agents on purpose: this container has no
+`/dev/dri` and holds nothing beyond the browser CDP already controls completely, so seeing
+and clicking adds no reach, only the parts CDP can't do.
+
+- **Same token, same path.** cdp-bridge wrap answers `GET /.vnc` with `Upgrade: rfb` by
+  splicing the connection onto wayvnc; unwrap's `-vnc-listen` serves it as plain VNC on
+  code-docker's loopback (`127.0.0.1:5900`), so dind's containers can't reach it.
+  `CHROME_AGENT_VNC=false` turns it off on the wrap side (404).
+- **`chrome-screen`** is `cdp-bridge screen` (`cdp-bridge/screen.go`), a minimal RFB
+  client: `shot` (PNG), `click`, `drag`, `scroll`, `type`, `key`. One connection per
+  command, shared mode, so the person's VNC session stays up and sees every move.
+- **`shot` takes the second frame** of its connection. wayvnc's first frame to a new
+  client can be the bare background (measured: grey while Chrome was up).
+- It speaks no-auth VNC only, so `VNC_PASSWORD` also shuts agents out.
+
 ## cdp-bridge is built twice
 
-Same `cdp-bridge/main.go`, two places:
+Same `cdp-bridge/` source, two places:
 
 | Half | When | Where | Output |
 |---|---|---|---|
@@ -280,8 +302,8 @@ code-docker never learns this project's name.
 The overlay also merges into services it does not define. That is how:
 
 - the token reaches `code-docker`;
-- `install.sh` and `chrome-ports` reach it (a read-only mount at
-  `/run/code-docker-chrome/`, plus a fixed launcher at `/usr/local/bin/chrome-ports`);
+- `install.sh`, `chrome-ports` and `chrome-screen` reach it (a read-only mount at
+  `/run/code-docker-chrome/`, plus fixed launchers in `/usr/local/bin/`);
 - webmanager learns about chrome-front's page (`WEBMANAGER_PROVIDER_CHROME`);
 - router joins `chrome-vnc` and `chrome-net`. Include merging is by
 service name and has no "only services this file defines" restriction.

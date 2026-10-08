@@ -16,7 +16,28 @@ if [[ -z "${CDP_BIND_ALIAS}" ]]; then
 fi
 BIND_ADDR="$(resolve_bind_alias "${CDP_BIND_ALIAS}")"
 
+# The screen rides the same token: wrap hands GET /.vnc to wayvnc, which listens on the
+# VNC network's address in this same container. An agent then sees and drives the desktop
+# a person sees, including what CDP can't reach (Chrome's toolbar, extension popups,
+# permission prompts). CHROME_AGENT_VNC=false keeps the screen to people only.
+VNC_ARGS=()
+case "${CHROME_AGENT_VNC:-true}" in
+  true)
+    VNC_ADDR="$(resolve_bind_alias "${VNC_BIND_ALIAS:?VNC_BIND_ALIAS is unset}"):${VNC_PORT:-5900}"
+    VNC_ARGS=(-vnc-upstream "${VNC_ADDR}")
+    echo "[cdp-wrap-service] screen shared with token holders at /.vnc -> ${VNC_ADDR}"
+    ;;
+  false)
+    echo "[cdp-wrap-service] CHROME_AGENT_VNC=false - the screen is not shared with agents"
+    ;;
+  *)
+    echo "[cdp-wrap-service] FATAL: CHROME_AGENT_VNC=${CHROME_AGENT_VNC} is not true or false" >&2
+    exit 1
+    ;;
+esac
+
 echo "[cdp-wrap-service] listening on ${BIND_ADDR}:${CDP_WRAP_PORT} (resolved from ${CDP_BIND_ALIAS}) -> 127.0.0.1:${CDP_PORT}"
 exec cdp-bridge wrap \
   -listen "${BIND_ADDR}:${CDP_WRAP_PORT}" \
-  -upstream "127.0.0.1:${CDP_PORT}"
+  -upstream "127.0.0.1:${CDP_PORT}" \
+  "${VNC_ARGS[@]}"

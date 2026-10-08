@@ -10,6 +10,9 @@ set -euo pipefail
 #      올리기")
 #   3. node, if missing, since chrome-devtools-mcp runs through npx
 #
+# The same cdp-bridge binary is chrome-screen's client (`cdp-bridge screen`), and the
+# unit serves the screen on 127.0.0.1:5900 for it.
+#
 # Everything it writes lives on /code, so a container recreate keeps all of it.
 
 UNIT_DIR="/code/.local/share/code-docker/supervisord"
@@ -101,5 +104,6 @@ through mcp-notice.py, which tells the agent how to reach dev servers from this 
 
 The browser itself is visible in router's VNC tab; add chrome-vnc:5900 there as a
 target. Claude drives that same browser over CDP, so a login you complete by hand in
-the VNC session is a login Claude then has.
+the VNC session is a login Claude then has. Claude sees that screen too, and can
+click and type on it, with chrome-screen (try `chrome-screen shot`).
 MSG

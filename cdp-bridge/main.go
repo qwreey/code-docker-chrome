@@ -17,6 +17,14 @@
 // the browser (cookie theft, arbitrary JS). The token is what lets this ride
 // on a shared internal network instead of demanding a dedicated one.
 //
+// The same token also carries the screen. wrap answers GET /.vnc with
+// "Upgrade: rfb" by splicing the connection onto wayvnc, and unwrap's
+// -vnc-listen serves that as a plain VNC port on loopback, so an agent sees and
+// drives the same desktop a person sees through router's VNC tab (see
+// `cdp-bridge screen`, screen.go). Through the token rather than by joining the
+// VNC network: that network also has Chrome on it, and a page Chrome opens could
+// then reach code-docker directly.
+//
 // One consequence of passing Host through: Chrome's DevTools HTTP endpoint has
 // DNS-rebinding protection and answers "Host header is specified and is not an
 // IP address or localhost" to anything else. Reaching wrap directly by service
@@ -26,9 +34,13 @@
 package main
 
 import (
+	"bufio"
 	"crypto/subtle"
 	"flag"
+	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -47,13 +59,18 @@ func main() {
 		mode = os.Args[1]
 		os.Args = append(os.Args[:1:1], os.Args[2:]...)
 	}
+	if mode == "screen" {
+		os.Exit(screenMain(os.Args[1:]))
+	}
 	listen := flag.String("listen", "", "address to listen on")
 	upstream := flag.String("upstream", "", "host:port to forward to")
 	tokenEnv := flag.String("token-env", "CHROME_CDP_TOKEN", "env var holding the shared secret")
+	vncUpstream := flag.String("vnc-upstream", "", "wrap: wayvnc's host:port, served to token holders at "+vncPath+" (empty: off)")
+	vncListen := flag.String("vnc-listen", "", "unwrap: loopback address to serve the screen on as plain VNC (empty: off)")
 	flag.Parse()
 
 	if mode != "wrap" && mode != "unwrap" {
-		log.Fatal("usage: cdp-bridge {wrap|unwrap} -listen ADDR -upstream HOST:PORT")
+		log.Fatal("usage: cdp-bridge {wrap|unwrap} -listen ADDR -upstream HOST:PORT, or cdp-bridge screen ...")
 	}
 	if *listen == "" || *upstream == "" {
 		log.Fatal("cdp-bridge: -listen and -upstream are both required")
@@ -94,7 +111,10 @@ func main() {
 
 	h := http.Handler(proxy)
 	if mode == "wrap" {
-		h = requireBearer(token, proxy)
+		h = requireBearer(token, serveVNC(*vncUpstream, proxy))
+	}
+	if mode == "unwrap" && *vncListen != "" {
+		go listenVNC(*vncListen, *upstream, token)
 	}
 
 	srv := &http.Server{
@@ -117,4 +137,118 @@ func requireBearer(token string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+const vncPath = "/.vnc"
+
+// serveVNC hands GET /.vnc (already past requireBearer) to wayvnc and everything else
+// to next. The path can't collide with Chrome's own endpoints, which all live under
+// /json and /devtools.
+func serveVNC(upstream string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != vncPath {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if upstream == "" {
+			http.Error(w, "the screen is not shared with agents here (CHROME_AGENT_VNC=false)", http.StatusNotFound)
+			return
+		}
+		if !strings.EqualFold(r.Header.Get("Upgrade"), "rfb") {
+			http.Error(w, "expected Upgrade: rfb", http.StatusBadRequest)
+			return
+		}
+		vnc, err := net.DialTimeout("tcp", upstream, 5*time.Second)
+		if err != nil {
+			http.Error(w, "wayvnc unreachable: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		client, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			vnc.Close()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: rfb\r\nConnection: Upgrade\r\n\r\n")
+		if err := rw.Flush(); err != nil {
+			client.Close()
+			vnc.Close()
+			return
+		}
+		pipe(bufConn{client, rw.Reader}, vnc)
+	})
+}
+
+// listenVNC serves the screen as plain VNC on listen (loopback): each connection is
+// upgraded at wrap's /.vnc with the token, then passed through untouched.
+func listenVNC(listen, upstream, token string) {
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		log.Fatalf("cdp-bridge unwrap: VNC: %v", err)
+	}
+	log.Printf("cdp-bridge unwrap: VNC %s -> %s%s", listen, upstream, vncPath)
+	for {
+		client, err := ln.Accept()
+		if err != nil {
+			log.Fatalf("cdp-bridge unwrap: VNC: %v", err)
+		}
+		go func() {
+			defer client.Close()
+			up, err := net.DialTimeout("tcp", upstream, 5*time.Second)
+			if err != nil {
+				log.Printf("cdp-bridge unwrap: VNC: %v", err)
+				return
+			}
+			defer up.Close()
+			fmt.Fprintf(up, "GET %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nConnection: Upgrade\r\nUpgrade: rfb\r\n\r\n", vncPath, upstream, token)
+			br := bufio.NewReader(up)
+			resp, err := http.ReadResponse(br, nil)
+			if err != nil {
+				log.Printf("cdp-bridge unwrap: VNC: %v", err)
+				return
+			}
+			if resp.StatusCode != http.StatusSwitchingProtocols {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+				log.Printf("cdp-bridge unwrap: VNC refused: %s %s", resp.Status, strings.TrimSpace(string(body)))
+				return
+			}
+			pipe(client, bufConn{up, br})
+		}()
+	}
+}
+
+// bufConn reads through a buffered reader that may already hold bytes past the HTTP
+// exchange (the server speaks first in RFB), and writes to the connection itself.
+type bufConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (c bufConn) Read(p []byte) (int, error) { return c.r.Read(p) }
+
+// pipe copies both ways until both directions are done, passing each half-close on.
+func pipe(a, b net.Conn) {
+	done := make(chan struct{}, 2)
+	half := func(dst, src net.Conn) {
+		io.Copy(dst, src)
+		closeWrite(dst)
+		done <- struct{}{}
+	}
+	go half(a, b)
+	go half(b, a)
+	<-done
+	<-done
+	a.Close()
+	b.Close()
+}
+
+func closeWrite(c net.Conn) {
+	if bc, ok := c.(bufConn); ok {
+		c = bc.Conn
+	}
+	if tc, ok := c.(interface{ CloseWrite() error }); ok {
+		tc.CloseWrite()
+		return
+	}
+	c.Close()
 }

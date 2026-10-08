@@ -9,7 +9,7 @@
 컨테이너 안에서 Chrome(labwc + wayvnc)을 띄우고, 두 가지 경로로 내보냅니다.
 
 - **CDP** → code-docker 안의 에이전트가 브라우저를 조작 (토큰 인증)
-- **VNC** → router를 거쳐 사람이 같은 화면을 봄 (에이전트는 못 붙음)
+- **VNC** → router를 거쳐 사람이 같은 화면을 봄. 에이전트도 CDP 토큰을 거쳐 같은 화면을 보고 조작함(`chrome-screen`)
 
 Chrome은 code-docker와 다른 망에 있어서, 임의 사이트의 JavaScript가 code-server, webmanager,
 dind에 닿지 않습니다. code-docker의 dev 서버는 포워딩한 포트만 Chrome에서
@@ -79,6 +79,25 @@ roblox-studio-docker와 같은 작은 데스크톱입니다.
 - 창 닫기는 제목줄 X나 Alt+F4. labwc 기본 단축키(Alt+Tab, Super+방향키)도 그대로입니다.
 - Chrome의 마지막 창을 닫으면 곧바로 새로 뜹니다. 에이전트가 쓰는 브라우저라 항상 하나는 떠 있습니다.
 - 다운로드는 `/root/Downloads`로 갑니다. 컨테이너 안이라 **재생성하면 사라집니다.**
+
+### 에이전트도 같은 화면을 씁니다 (chrome-screen)
+
+CDP로는 페이지 안쪽만 다룰 수 있고, 툴바, 확장 팝업, 권한 창, 메뉴, 데스크톱은 다루지 못합니다.
+그래서 에이전트에게도 화면을 열어 둡니다. 경로는 CDP와 같은 토큰을 거치고, code-docker 안에서는
+loopback(`127.0.0.1:5900`)에만 열립니다.
+
+```sh
+chrome-screen shot                 # /tmp/chrome-screen.png
+chrome-screen click 40 1064        # 화면 좌표(PNG 픽셀 그대로)
+chrome-screen type 'hello'
+chrome-screen key ctrl+l Return
+chrome-screen help
+```
+
+- VNC로 보고 있는 사람에게 에이전트의 조작이 그대로 보입니다.
+- 끄려면 code-docker `.env`에 `CHROME_AGENT_VNC=false`를 넣으세요. `VNC_PASSWORD`를 설정해도
+  에이전트는 화면에 붙지 못합니다.
+- 한글처럼 키보드 배열에 없는 문자는 `type`으로 넣을 수 없습니다. 페이지 안이라면 CDP로 입력하세요.
 
 ## 구조
 
