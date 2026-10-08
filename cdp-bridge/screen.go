@@ -211,7 +211,16 @@ func screenCommand(addr, cmd string, args []string) (err error) {
 		if len(pos) == 0 {
 			return errors.New("needs text")
 		}
-		for _, r := range strings.Join(pos, " ") {
+		text := strings.Join(pos, " ")
+		// wayvnc types a keysym only if the keyboard layout (US) has it, and drops the rest
+		// without an error (measured: "Hello 한글" typed "Hello"). Refuse up front
+		// rather than report success for text that never arrived.
+		for _, r := range text {
+			if r > 0x7e || (r < 0x20 && r != '\n' && r != '\t') {
+				return fmt.Errorf("%q is not on the keyboard layout; put text like this into a page with CDP (Input.insertText) instead", r)
+			}
+		}
+		for _, r := range text {
 			if err := v.tap(nil, runeKeysym(r)); err != nil {
 				return err
 			}
