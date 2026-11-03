@@ -141,7 +141,10 @@ port 5173, while the page's origin stays `http://localhost:5173`:
   - On chrome-net, any page Chrome opens could add forwards through
     `http://localhost:8090`.
   - The API has no token. Reaching code-docker-internal is already more than a forward
-    grants.
+    grants - but only while dind's unauthenticated Docker API sits on the same network
+    (code-docker's CLAUDE.md, security section). Restrict that and this API becomes the
+    next thing a sibling container can change; it then needs caller auth, see
+    code-docker's `.claude/backlog/internal-network-callers.md`.
 - **Targets are limited** (`targetPolicy`), because a forward serves every page Chrome
   opens, not only the dev tool it was added for. A forward to `dind:2375` would hand any
   site the unauthenticated Docker API, guarded only by the Local Network Access prompt.
