@@ -54,7 +54,7 @@ RUN mkdir -p /var/log/dbus /var/log/labwc /var/log/wayvnc /var/log/chromium \
 # router-docker-client rather than vendored, exactly as roblox-studio-docker does -
 # neither is specific to this project. Pinned to that repo's release tag (see its own
 # CLAUDE.md); code-docker's dev-bump-router-client.sh moves this default.
-ARG ROUTER_CLIENT_REF=v0.1.1
+ARG ROUTER_CLIENT_REF=v0.1.2
 ADD https://github.com/qwreey/router-docker-client.git#${ROUTER_CLIENT_REF}:dns-local /etc/code-docker-chrome/router-client/dns-local
 ADD https://github.com/qwreey/router-docker-client.git#${ROUTER_CLIENT_REF}:netshare /etc/code-docker-chrome/router-client/netshare
 RUN chmod +x /etc/code-docker-chrome/router-client/dns-local/dns-local.sh
